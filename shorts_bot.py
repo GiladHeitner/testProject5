@@ -576,6 +576,27 @@ def generate_voiceover_from_cloner_script(
         transformed.unlink()
 
 
+def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_path: Path) -> None:
+    text = script_text.replace("*", "").strip()
+    if not text:
+        raise RuntimeError("Empty script text; cannot generate voiceover.")
+    models_to_try = ["gpt-4o-mini-tts", "tts-1"]
+    last_exc: Exception | None = None
+    for model in models_to_try:
+        try:
+            audio = client.audio.speech.create(
+                model=model,
+                voice="alloy",
+                input=text,
+                format="mp3",
+            )
+            out_audio_path.write_bytes(audio.read())
+            return
+        except Exception as exc:
+            last_exc = exc
+    raise RuntimeError(f"OpenAI TTS failed: {last_exc}")
+
+
 def transcribe_audio_to_srt(
     client: OpenAI,
     audio_path: Path,
@@ -1315,6 +1336,12 @@ def main() -> None:
         default="",
         help="Optional path to Adam voice cloner run script (defaults to VoiceCloner/run_clone.sh)",
     )
+    parser.add_argument(
+        "--tts",
+        default="cloner",
+        choices=["cloner", "openai"],
+        help="Narration engine: cloner (local Adam voice) or openai (cloud-friendly).",
+    )
     parser.add_argument("--upload", action="store_true", help="Upload the output video to YouTube")
     parser.add_argument("--privacy", default="public", choices=["private", "unlisted", "public"], help="public = Shorts feed; private = no impressions")
     parser.add_argument("--no-description", action="store_true", help="Upload with an empty YouTube description")
@@ -1463,12 +1490,17 @@ def main() -> None:
     else:
         print_progress(step, total_steps, "Creating voiceover")
         raw_narration_file = output_dir / "narration_raw.mp3"
-        generate_voiceover_from_cloner_script(
-            script_text=script,
-            out_audio_path=raw_narration_file,
-            project_root=project_root,
-            cloner_script=args.adam_cloner_script,
-        )
+        if args.tts == "openai":
+            if client is None:
+                raise RuntimeError("OpenAI client missing; cannot use --tts openai.")
+            generate_voiceover_openai_tts(client, script, raw_narration_file)
+        else:
+            generate_voiceover_from_cloner_script(
+                script_text=script,
+                out_audio_path=raw_narration_file,
+                project_root=project_root,
+                cloner_script=args.adam_cloner_script,
+            )
         narration_file = raw_narration_file
         if client is not None:
             narration_reference_segments = get_whisper_word_timestamps(client, narration_file)
