@@ -45,8 +45,7 @@ fi
 
 source ".venv/bin/activate"
 if [[ "${CI:-}" == "true" ]]; then
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
+  echo "CI mode: using workflow-installed Python dependencies."
 else
   python -m pip install --upgrade pip >/dev/null 2>&1
   python -m pip install -r requirements.txt >/dev/null 2>&1
