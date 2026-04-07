@@ -1,0 +1,87 @@
+name: Auto Generate & Upload Short
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg sox
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Materialize required auth files from secrets
+        env:
+          YT_CLIENT_SECRET_JSON: ${{ secrets.YT_CLIENT_SECRET_JSON }}
+          YT_TOKEN_JSON: ${{ secrets.YT_TOKEN_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$YT_CLIENT_SECRET_JSON" ] || [ -z "$YT_TOKEN_JSON" ] || [ -z "$OPENAI_API_KEY" ]; then
+            echo "Missing one or more required secrets: YT_CLIENT_SECRET_JSON, YT_TOKEN_JSON, OPENAI_API_KEY"
+            exit 1
+          fi
+          printf '%s' "$YT_CLIENT_SECRET_JSON" > client_secret.json
+          printf '%s' "$YT_TOKEN_JSON" > youtube_token.json
+          printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" > .env
+
+      - name: Random 30-minute delay
+        run: sleep $((RANDOM % 1800))
+
+      - name: Pick an unused topic
+        run: |
+          chmod +x ./run.sh
+          if [ ! -f topics.txt ]; then
+            echo "Missing topics.txt in repository root."
+            exit 1
+          fi
+          mkdir -p .github
+          USED_FILE=".github/used_topics.txt"
+          touch "$USED_FILE"
+          TOPIC="$(awk 'NF && $0 !~ /^[[:space:]]*#/' topics.txt | grep -Fvxf "$USED_FILE" | shuf -n 1)"
+          if [ -z "$TOPIC" ]; then
+            echo "All topics were used. Resetting used-topic history."
+            : > "$USED_FILE"
+            TOPIC="$(awk 'NF && $0 !~ /^[[:space:]]*#/' topics.txt | shuf -n 1)"
+          fi
+          if [ -z "$TOPIC" ]; then
+            echo "topics.txt is empty (or only comments/blank lines)."
+            exit 1
+          fi
+          echo "Selected topic: $TOPIC"
+          echo "TOPIC=$TOPIC" >> "$GITHUB_ENV"
+
+      - name: Generate and upload short
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: ./run.sh --topic "$TOPIC"
+
+      - name: Save used-topic state
+        run: |
+          USED_FILE=".github/used_topics.txt"
+          grep -Fqx "$TOPIC" "$USED_FILE" || echo "$TOPIC" >> "$USED_FILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$USED_FILE"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: track used topic"
+            git push
+          fi

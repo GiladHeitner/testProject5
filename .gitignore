@@ -1,0 +1,17 @@
+.venv/
+VoiceCloner/.venv/
+output/
+__pycache__/
+*.pyc
+.env
+youtube_token.json
+client_secret.json
+.DS_Store
+assets/gameplay/*.mov
+assets/gameplay/*.mp4
+assets/gameplay/*.mkv
+assets/gameplay/*.webm
+VoiceCloner/custom.wav
+VoiceCloner/custom_sp.wav
+scheduler.log
+scheduler_state.txt
