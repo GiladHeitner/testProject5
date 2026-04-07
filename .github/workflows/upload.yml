@@ -35,6 +35,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+          python -m venv .venv
+          . .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
           python -m pip install --no-cache-dir -r requirements.txt
