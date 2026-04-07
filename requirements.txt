@@ -7,3 +7,5 @@ requests
 bing-image-downloader
 librosa
 soundfile
+torch
+qwen-tts

@@ -12,6 +12,8 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      HF_HOME: ~/.cache/huggingface
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,6 +24,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: "pip"
 
       - name: Install system dependencies
         run: |
@@ -30,6 +33,14 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: Cache Hugging Face model files
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-qwen-tts-v1
+          restore-keys: |
+            ${{ runner.os }}-qwen-tts-
 
       - name: Materialize required auth files from secrets
         env:
@@ -81,7 +92,7 @@ jobs:
       - name: Generate and upload short
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: ./run.sh --topic "$TOPIC" --tts openai
+        run: ./run.sh --topic "$TOPIC"
 
       - name: Save used-topic state
         run: |
