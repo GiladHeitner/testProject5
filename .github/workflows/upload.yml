@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,6 +38,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
           python -m pip install --no-cache-dir -r requirements.txt
+
+      # Gameplay lives on Google Drive (not Git LFS) to avoid LFS bandwidth limits.
+      # Files: https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7 and .../1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p
+      - name: Download gameplay from Google Drive
+        run: |
+          . .venv/bin/activate
+          python -m pip install -q gdown
+          mkdir -p assets/gameplay
+          gdown --fuzzy "https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7/view?usp=sharing" \
+            -O assets/gameplay/workflow_part00.mov
+          gdown --fuzzy "https://drive.google.com/file/d/1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p/view?usp=sharing" \
+            -O assets/gameplay/workflow_part01.mov
+          ls -lh assets/gameplay/
 
       - name: Cache Hugging Face model files
         uses: actions/cache@v4
