@@ -44,8 +44,13 @@ if [[ ! -d ".venv" ]]; then
 fi
 
 source ".venv/bin/activate"
-python -m pip install --upgrade pip >/dev/null 2>&1
-python -m pip install -r requirements.txt >/dev/null 2>&1
+if [[ "${CI:-}" == "true" ]]; then
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
+else
+  python -m pip install --upgrade pip >/dev/null 2>&1
+  python -m pip install -r requirements.txt >/dev/null 2>&1
+fi
 
 WORDS="${WORDS:-100}"
 
