@@ -46,6 +46,7 @@ jobs:
           printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" > .env
 
       - name: Random 30-minute delay
+        if: github.event_name == 'schedule'
         run: sleep $((RANDOM % 1800))
 
       - name: Pick an unused topic
