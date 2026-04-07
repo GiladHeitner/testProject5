@@ -24,7 +24,11 @@ PITCH_VALUES="${PITCH_VALUES:--2,0,2}"
 # Script logic
 # -----------------------------
 cd "$(dirname "$0")"
-source .venv/bin/activate
+if [[ -f ".venv/bin/activate" ]]; then
+  source ".venv/bin/activate"
+elif [[ -f "../.venv/bin/activate" ]]; then
+  source "../.venv/bin/activate"
+fi
 
 REF_TEXT="$(cat "$REF_TEXT_FILE")"
 

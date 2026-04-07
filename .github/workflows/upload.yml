@@ -43,6 +43,12 @@ jobs:
           fi
           printf '%s' "$YT_CLIENT_SECRET_JSON" > client_secret.json
           printf '%s' "$YT_TOKEN_JSON" > youtube_token.json
+          if [ ! -s client_secret.json ] || [ ! -s youtube_token.json ]; then
+            echo "Secret materialization failed (empty JSON file). Re-save your secrets."
+            exit 1
+          fi
+          python -m json.tool client_secret.json >/dev/null
+          python -m json.tool youtube_token.json >/dev/null
           printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" > .env
 
       - name: Random 30-minute delay
