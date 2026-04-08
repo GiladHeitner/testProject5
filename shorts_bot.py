@@ -441,7 +441,7 @@ STYLE RULES (match these exactly):
 - Use quoted dialogue to bring scenes to life
 - Build tension and emotion beat by beat
 - End on a high — a moment that makes the viewer feel something
-- TARGET WORD COUNT: {low}–{high} words
+- TARGET WORD COUNT: 85–115 words
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
 - Research the topic to write authentically and specifically
 
