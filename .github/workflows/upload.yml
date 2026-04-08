@@ -1,8 +1,8 @@
 name: Auto Generate & Upload Short
 
 on:
-  schedule:
-    - cron: "0 18 * * *" # 10:00 AM PST
+  repository_dispatch:
+    types: [trigger-shorts] # This is your custom "button" name
   workflow_dispatch:
 
 permissions:
