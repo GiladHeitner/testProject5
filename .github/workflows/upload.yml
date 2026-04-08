@@ -26,18 +26,14 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # FFmpeg is already pre-installed on ubuntu-latest! 
-          # We only need sox. Skipping apt-get update saves ~2 minutes.
           sudo apt-get update
-          sudo apt-get install -y sox
+          sudo apt-get install -y ffmpeg sox
 
       - name: Install Python dependencies
         run: |
           python -m venv .venv
           . .venv/bin/activate
           python -m pip install --upgrade pip
-          # Torch is huge. Using the CPU-only index is smart, but 
-          # we can skip the --no-cache-dir to let GitHub's cache do its job.
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
           python -m pip install -r requirements.txt
 
