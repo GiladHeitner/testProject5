@@ -28,6 +28,7 @@ jobs:
         run: |
           # FFmpeg is already pre-installed on ubuntu-latest! 
           # We only need sox. Skipping apt-get update saves ~2 minutes.
+          sudo apt-get update
           sudo apt-get install -y sox
 
       - name: Install Python dependencies
