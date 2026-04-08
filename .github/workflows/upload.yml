@@ -26,18 +26,19 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.list || true
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list || true
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg sox
+          # FFmpeg is already pre-installed on ubuntu-latest! 
+          # We only need sox. Skipping apt-get update saves ~2 minutes.
+          sudo apt-get install -y sox
 
       - name: Install Python dependencies
         run: |
           python -m venv .venv
           . .venv/bin/activate
           python -m pip install --upgrade pip
+          # Torch is huge. Using the CPU-only index is smart, but 
+          # we can skip the --no-cache-dir to let GitHub's cache do its job.
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
-          python -m pip install --no-cache-dir -r requirements.txt
+          python -m pip install -r requirements.txt
 
       # Gameplay lives on Google Drive (not Git LFS) to avoid LFS bandwidth limits.
       # Files: https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7 and .../1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p
