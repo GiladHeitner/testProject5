@@ -434,6 +434,7 @@ My crush kissed me. No, I'm not kidding. Okay, quick recap. Last time she hugged
 ---
 
 STYLE RULES (match these exactly):
+- Must rehook the person throughout the video
 - The video is going to be posted on shorts so it auto loops so make sure the last line loops into the first line without repeating the first line it should sound unfinished unless you hear the first line again
 - Hook must have a high chance of being used in the title
 - First-person, past tense, told like you're talking to a best friend
