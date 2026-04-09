@@ -239,7 +239,7 @@ def write_ass_from_segments(segments: List[dict], out_path: Path) -> None:
         "ScriptType: v4.00+",
         "PlayResX: 1080",
         "PlayResY: 1920",
-        "WrapStyle: 2",
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
