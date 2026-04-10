@@ -1,4 +1,5 @@
 import argparse
+import difflib
 import json
 import math
 import os
@@ -114,6 +115,22 @@ def smart_speed_ramp(
 
 def _normalize_word_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def strip_script_markup(script_text: str) -> str:
+    cleaned = (
+        script_text.replace("--", " ")
+        .replace("*", "")
+        .replace("“", '"')
+        .replace("”", '"')
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def script_words_for_alignment(script_text: str) -> List[str]:
+    cleaned = strip_script_markup(script_text).replace('"', " ")
+    return [word for word in cleaned.split() if word]
 
 
 def get_highlight_timestamps(script: str, words: List[dict]) -> List[Tuple[float, float]]:
@@ -662,14 +679,16 @@ def _resolve_adam_cloner_script(project_root: Path, configured_script: str) -> P
     return script_path
 
 
-def get_whisper_word_timestamps(client: OpenAI, audio_path: Path) -> List[dict]:
+def get_whisper_word_timestamps(client: OpenAI, audio_path: Path, script_text: str = "") -> List[dict]:
     """Get exact word-level timestamps from Whisper for subtitle sync."""
+    whisper_prompt = build_whisper_prompt(script_text) if script_text else ""
     with audio_path.open("rb") as audio_file:
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             response_format="verbose_json",
             timestamp_granularities=["word"],
+            prompt=whisper_prompt or None,
         )
     words = []
     if hasattr(transcript, "words") and transcript.words:
@@ -690,7 +709,7 @@ def generate_voiceover_from_cloner_script(
     run_clone_path = _resolve_adam_cloner_script(project_root, cloner_script)
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
     env = os.environ.copy()
-    env["TEXT"] = script_text.replace('*', '')
+    env["TEXT"] = strip_script_markup(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
     result = subprocess.run(
@@ -720,7 +739,7 @@ def generate_voiceover_from_cloner_script(
 
 
 def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_path: Path) -> None:
-    text = script_text.replace("*", "").strip()
+    text = strip_script_markup(script_text)
     if not text:
         raise RuntimeError("Empty script text; cannot generate voiceover.")
     models_to_try = ["gpt-4o-mini-tts", "tts-1"]
@@ -740,6 +759,79 @@ def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_pa
     raise RuntimeError(f"OpenAI TTS failed: {last_exc}")
 
 
+def build_whisper_prompt(script_text: str) -> str:
+    cleaned = strip_script_markup(script_text)
+    words = cleaned.split()
+    return " ".join(words[:244])
+
+
+def build_caption_chunks_from_word_timestamps(
+    script_text: str,
+    word_timestamps: List[dict],
+    words_per_chunk: int = 5,
+) -> List[dict]:
+    clean_script = script_words_for_alignment(script_text)
+    if not clean_script or not word_timestamps:
+        return []
+
+    def norm(token: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", token.lower())
+
+    script_norm = [norm(word) for word in clean_script]
+    whisper_norm = [norm(str(word.get("text", ""))) for word in word_timestamps]
+    matcher = difflib.SequenceMatcher(None, script_norm, whisper_norm)
+    aligned_words: List[dict] = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for i, j in zip(range(i1, i2), range(j1, j2)):
+                aligned_words.append(
+                    {
+                        "text": clean_script[i],
+                        "start": float(word_timestamps[j]["start"]),
+                        "end": float(word_timestamps[j]["end"]),
+                    }
+                )
+            continue
+
+        block_script = clean_script[i1:i2]
+        block_whisper = word_timestamps[j1:j2]
+        if not block_script:
+            continue
+
+        if block_whisper:
+            t_start = float(block_whisper[0]["start"])
+            t_end = float(block_whisper[-1]["end"])
+        else:
+            t_start = float(aligned_words[-1]["end"]) if aligned_words else 0.0
+            t_end = t_start + (0.25 * len(block_script))
+
+        duration = max(0.1, t_end - t_start)
+        time_per_word = duration / len(block_script)
+        for idx, word in enumerate(block_script):
+            aligned_words.append(
+                {
+                    "text": word,
+                    "start": t_start + (idx * time_per_word),
+                    "end": t_start + ((idx + 1) * time_per_word),
+                }
+            )
+
+    chunks: List[dict] = []
+    for i in range(0, len(aligned_words), words_per_chunk):
+        chunk = aligned_words[i : i + words_per_chunk]
+        if not chunk:
+            continue
+        start_s = float(chunk[0]["start"])
+        end_s = float(chunk[-1]["end"])
+        if end_s <= start_s:
+            end_s = start_s + 0.2
+        raw_text = " ".join(str(word["text"]) for word in chunk).strip()
+        if raw_text:
+            chunks.append({"start": start_s, "end": end_s, "raw_text": raw_text})
+    return chunks
+
+
 def transcribe_audio_to_srt(
     client: OpenAI,
     audio_path: Path,
@@ -748,12 +840,14 @@ def transcribe_audio_to_srt(
     reference_segments: List[dict] | None = None,
 ) -> Tuple[List[dict], List[dict]]:
     normalized: List[dict] = []
+    whisper_prompt = build_whisper_prompt(script_text) if script_text else ""
 
     with audio_path.open("rb") as audio_file:
         srt_text = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             response_format="srt",
+            prompt=whisper_prompt or None,
         )
     srt_raw = str(srt_text).strip()
     if srt_raw:
@@ -768,6 +862,7 @@ def transcribe_audio_to_srt(
                 model="whisper-1",
                 file=audio_file,
                 response_format="verbose_json",
+                prompt=whisper_prompt or None,
             )
         segments = getattr(transcript, "segments", None)
         if segments is None and isinstance(transcript, dict):
@@ -798,7 +893,22 @@ def transcribe_audio_to_srt(
         if end_s <= start_s:
             end_s = start_s + 0.2
         no_emoji_segments.append({"start": start_s, "end": end_s, "text": clean})
-    caption_chunks = split_caption_chunks(no_emoji_segments, words_per_chunk=5)
+
+    caption_chunks: List[dict] = []
+    if script_text:
+        word_timestamps = get_whisper_word_timestamps(client, audio_path, script_text)
+        caption_chunks = build_caption_chunks_from_word_timestamps(
+            script_text,
+            word_timestamps,
+            words_per_chunk=5,
+        )
+        if not caption_chunks:
+            remapped = remap_script_to_reference_timing(strip_script_markup(script_text), no_emoji_segments)
+            if remapped:
+                no_emoji_segments = remapped
+
+    if not caption_chunks:
+        caption_chunks = split_caption_chunks(no_emoji_segments, words_per_chunk=5)
     ass_segments = [
         {"start": c["start"], "end": c["end"], "raw_text": c["raw_text"]}
         for c in caption_chunks
@@ -1677,7 +1787,7 @@ def main() -> None:
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
             print("Applying dynamic speed ramps from quoted / --hyphen-wrapped-- phrases...")
-            raw_words = get_whisper_word_timestamps(client, raw_narration_file)
+            raw_words = get_whisper_word_timestamps(client, raw_narration_file, script)
             highlights = get_highlight_timestamps(script, raw_words)
             if highlights:
                 smart_speed_ramp(
@@ -1694,7 +1804,7 @@ def main() -> None:
         else:
             narration_file = raw_narration_file
         if client is not None:
-            narration_reference_segments = get_whisper_word_timestamps(client, narration_file)
+            narration_reference_segments = get_whisper_word_timestamps(client, narration_file, script)
 
     step += 1
     subtitle_file = output_dir / "subtitles.ass"
