@@ -5,6 +5,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -15,6 +16,7 @@ from typing import List, Tuple
 import requests
 from dotenv import load_dotenv
 from openai import OpenAI
+from pydub import AudioSegment
 
 try:
     from bing_image_downloader import downloader as bing_downloader
@@ -33,6 +35,137 @@ class PopupImage:
     play_sfx: bool = False
     use_fade: bool = True
     is_emoji: bool = False
+
+
+def respeed(segment: AudioSegment, speed_factor: float, output_frame_rate: int) -> AudioSegment:
+    new_sample_rate = max(1000, int(segment.frame_rate * speed_factor))
+    warped = segment._spawn(segment.raw_data, overrides={"frame_rate": new_sample_rate})
+    return warped.set_frame_rate(output_frame_rate)
+
+
+def _smoothstep(t: float) -> float:
+    t = max(0.0, min(1.0, t))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def get_dynamic_speed_factor(
+    t_ms: float,
+    highlights: List[Tuple[float, float]],
+    ramp_ms: int,
+    slow_factor: float,
+    fast_factor: float,
+) -> float:
+    if not highlights:
+        return fast_factor
+    if ramp_ms <= 0:
+        for start_ms, end_ms in highlights:
+            if start_ms <= t_ms <= end_ms:
+                return slow_factor
+        return fast_factor
+
+    best = fast_factor
+    for start_ms, end_ms in highlights:
+        if start_ms <= t_ms <= end_ms:
+            best = min(best, slow_factor)
+        elif start_ms - ramp_ms <= t_ms < start_ms:
+            u = 1.0 - ((start_ms - t_ms) / ramp_ms)
+            f = fast_factor + (slow_factor - fast_factor) * _smoothstep(u)
+            best = min(best, f)
+        elif end_ms < t_ms <= end_ms + ramp_ms:
+            u = (t_ms - end_ms) / ramp_ms
+            f = slow_factor + (fast_factor - slow_factor) * _smoothstep(u)
+            best = min(best, f)
+    return best
+
+
+def smart_speed_ramp(
+    input_path: Path,
+    output_path: Path,
+    interesting_segments: List[Tuple[float, float]],
+    ramp_ms: int = 600,
+    slow_factor: float = 0.60,
+    fast_factor: float = 1.15,
+    step_ms: int = 40,
+    bitrate: str = "320k",
+) -> None:
+    audio = AudioSegment.from_file(input_path)
+    frame_rate = audio.frame_rate
+    total_ms = len(audio)
+    out = AudioSegment.empty()
+    pos = 0
+    step_ms = max(5, int(step_ms))
+
+    while pos < total_ms:
+        end = min(pos + step_ms, total_ms)
+        chunk = audio[pos:end]
+        mid_time_ms = (pos + end) / 2.0
+        speed = get_dynamic_speed_factor(
+            mid_time_ms,
+            interesting_segments,
+            ramp_ms,
+            slow_factor,
+            fast_factor,
+        )
+        out += respeed(chunk, speed, frame_rate)
+        pos = end
+
+    out.export(output_path, format="mp3", bitrate=bitrate)
+
+
+def _normalize_word_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def get_highlight_timestamps(script: str, words: List[dict]) -> List[Tuple[float, float]]:
+    phrase_matches = re.findall(r'"([^"]+)"|“([^”]+)”|--([^-][\s\S]*?[^-])--', script)
+    phrases = [
+        (ascii_phrase or smart_phrase or hyphen_phrase).strip()
+        for ascii_phrase, smart_phrase, hyphen_phrase in phrase_matches
+    ]
+    phrases = [phrase for phrase in phrases if phrase]
+    if not phrases:
+        return []
+
+    normalized_words = [
+        {
+            "text": _normalize_word_token(str(word.get("text", ""))),
+            "start": float(word["start"]) * 1000.0,
+            "end": float(word["end"]) * 1000.0,
+        }
+        for word in words
+        if _normalize_word_token(str(word.get("text", "")))
+    ]
+
+    highlights: List[Tuple[float, float]] = []
+    search_from = 0
+    for phrase in phrases:
+        phrase_words = [_normalize_word_token(part) for part in phrase.split()]
+        phrase_words = [part for part in phrase_words if part]
+        if not phrase_words:
+            continue
+
+        for idx in range(search_from, len(normalized_words)):
+            if normalized_words[idx]["text"] != phrase_words[0]:
+                continue
+            end_idx = idx
+            match_ok = True
+            for phrase_word in phrase_words[1:]:
+                found = False
+                for probe in range(end_idx + 1, min(end_idx + 8, len(normalized_words))):
+                    if normalized_words[probe]["text"] == phrase_word:
+                        end_idx = probe
+                        found = True
+                        break
+                if not found:
+                    match_ok = False
+                    break
+            if match_ok:
+                highlights.append(
+                    (normalized_words[idx]["start"], normalized_words[end_idx]["end"])
+                )
+                search_from = end_idx + 1
+                break
+    return highlights
 
 
 def run(command: str) -> str:
@@ -155,18 +288,20 @@ def format_caption_multiline(
     return "\n".join(lines)
 
 
-def estimate_line_width_px(line_text: str, font_size: int = 115) -> int:
-    # Keep estimate stable to reduce visible jitter between similar lines.
+def estimate_line_width_px(line_text: str, font_size: int = 100) -> int:
+    # Tune estimate for bold, uppercase-heavy caption styling.
     width = 0.0
     for ch in line_text:
         if ch == " ":
-            width += 0.34
+            width += 0.35
         elif ch in "ilI|.,'`!:":
-            width += 0.36
+            width += 0.40
         elif ch in "mwMW@#%&":
-            width += 0.72
+            width += 0.90
+        elif ch.isupper():
+            width += 0.75
         else:
-            width += 0.54
+            width += 0.60
     return int(width * font_size)
 
 
@@ -196,7 +331,7 @@ def split_caption_chunks(segments: List[dict], words_per_chunk: int = 2) -> List
             c_end = end_s if idx == len(pieces) - 1 else (c_start + chunk_duration)
             emoji = pick_emoji_for_text(piece)
             caption_text = format_caption_multiline(
-                piece, max_words_per_line=3, max_chars_per_line=22, max_lines=2
+                piece, max_words_per_line=3, max_chars_per_line=16, max_lines=2
             )
             lines = [ln for ln in caption_text.split("\n") if ln.strip()]
             last_line = lines[-1] if lines else piece
@@ -222,11 +357,12 @@ def format_bold_ass(text: str) -> str:
     return "".join(parts)
 
 def random_caps_text(text: str, probability: float = 0.3) -> str:
+    rng = random.Random(text)
     words = text.split(' ')
     result = []
     for word in words:
         clean = ''.join(c for c in word if c.isalpha())
-        if clean and len(clean) >= 3 and random.random() < probability:
+        if clean and len(clean) >= 3 and rng.random() < probability:
             result.append(word.upper())
         else:
             result.append(word)
@@ -239,7 +375,7 @@ def write_ass_from_segments(segments: List[dict], out_path: Path) -> None:
         "ScriptType: v4.00+",
         "PlayResX: 1080",
         "PlayResY: 1920",
-        "WrapStyle: 0",
+        "WrapStyle: 1",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
@@ -247,7 +383,7 @@ def write_ass_from_segments(segments: List[dict], out_path: Path) -> None:
         "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
         "Alignment,MarginL,MarginR,MarginV,Encoding",
         "Style: Default,Gibson,100,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
-        "-1,0,0,0,100,100,0,0,1,7,0,8,80,80,520,1",
+        "-1,0,0,0,100,100,0,0,1,7,0,8,180,180,520,1",
         "",
         "[Events]",
         "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
@@ -263,7 +399,7 @@ def write_ass_from_segments(segments: List[dict], out_path: Path) -> None:
             end_s = start_s + 0.25
         text = escape_ass_text(
             format_caption_multiline(
-                random_caps_text(raw_text), max_words_per_line=3, max_chars_per_line=22, max_lines=2
+                random_caps_text(raw_text), max_words_per_line=3, max_chars_per_line=16, max_lines=2
             )
         )
         text = format_bold_ass(text)
@@ -430,13 +566,18 @@ Write a YouTube Shorts storytime script about: {topic_line} Cater the story to a
 Use the EXACT same writing style, pacing, tone, and length as this example script:
 
 ---
-My crush kissed me. No, I'm not kidding. Okay, quick recap. Last time she hugged me after our walk and said, "See you tomorrow, singer boy." That was 3 days ago, and we haven't stopped talking since. She texted me till midnight, walking home together, sharing songs. Somehow, she's already part of my everyday. First off, she posted a video of me singing on her story with a tiny red heart right over my face. Yeah, my face. My friends went feral in the group chat. Yesterday at lunch, we were sitting together when two idiots from my class came up trying to be funny. One goes, "Hey, your girlfriend got room for one more." Before I could even answer, she smiles and goes, "Maybe ask your boyfriend first. He looks like the jealous type." Bro, they froze. One muttered something and they both left. I was just sitting there laughing and half shocked. She looked at me and said, "What? I was saving you." Later that day, she texted, "You want to come over and study?" Of course, I said yes. We ended up doing way more laughing than studying. Sitting close, sharing snacks, making dumb jokes like always. Somehow, we ended up half cuddled on the couch. The room quiet except for her playlist, softly playing. Then, I dropped my pen. I leaned down to grab it, and when I sat back up, she was already looking at me. For a second, neither of us said anything. Then, she leaned in and kissed me. Quick, soft. Then, she pulled back, met my eyes, smiled, and kissed me again. Slower this time. It was honestly incredible. Like nothing else mattered for a second. I don't even remember how I got home that night.
+My crush kissed me. --No, I'm not kidding--. Okay, quick recap. Last time she hugged me after our walk and said, "See you tomorrow, --singer boy.--" That was 3 days ago, and we haven't stopped talking since. She texted me till midnight, walking home together, sharing songs. Somehow, she's already part of my everyday. First off, she posted a video of me singing on her story with a tiny red heart --right over my face.-- Yeah, my face. My friends went feral in the group chat. Yesterday at lunch, we were sitting together when two idiots from my class came up trying to be funny. One goes, "Hey, your girlfriend got room for one more." Before I could even answer, she smiles and goes, "Maybe ask your boyfriend first. He looks like the jealous type." --Bro, they froze.-- One muttered something and they both left. I was just sitting there laughing and half shocked. She looked at me and said, "What? I was saving you." Later that day, she texted, "You want to come over and study?" Of course, I said yes. We ended up doing way more laughing than studying. Sitting close, sharing snacks, making dumb jokes like always. Somehow, we ended up --half cuddled on the couch.-- The room quiet except for her playlist, softly playing. Then, I dropped my pen. I leaned down to grab it, and when I sat back up, --she was already looking at me.-- For a second, neither of us said anything. Then, she leaned in --and kissed me.-- Quick, soft. Then, she pulled back, met my eyes, smiled, and kissed me again. --Slower this time.-- It was honestly incredible. Like nothing else mattered for a second. I --don't even remember-- how I got home that night.
 ---
 
 STYLE RULES (match these exactly):
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
 - The video is going to be posted on shorts so it auto loops so make sure the last line loops into the first line without repeating the first line it should sound unfinished unless you hear the first line again
+- DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect (e.g., "--my iPad went flying--"). 
+- FOCUS ON IMPACT: Do NOT wrap descriptive fluff or narrator asides (like "slow motion, like a movie"). Only wrap the actual event or the most shocking part of the sentence.
+- RAMP LENGTH: Only wrap short phrases of 2 to 5 words. Never wrap an entire sentence.
+- RAMP SPACING: NEVER put hyphenated phrases back-to-back. You must space them out evenly throughout the script so the audio has time to return to normal speed between drops.
+- End the video by saying subscribe before I get --banned--!
 - Hook must have a high chance of being used in the title
 - First-person, past tense, told like you're talking to a best friend
 - Fast-paced. Short punchy sentences. No filler.
@@ -452,7 +593,7 @@ Write ONE complete script now.
     resp = client.responses.create(
         model="gpt-4o",
         input=prompt,
-        temperature=0.8,
+        temperature=0.7,
     )
     return resp.output_text.strip()
 
@@ -928,7 +1069,7 @@ def build_emoji_overlays(subtitle_segments: List[dict], emoji_dir: Path) -> List
     top_margin = 520
     caption_center_x = 540
     emoji_size = 105
-    padding = 2
+    padding = 25
     screen_padding = 56
     safety_padding = 90
     # Match ASS caption chunking exactly so emoji placement stays aligned.
@@ -937,14 +1078,19 @@ def build_emoji_overlays(subtitle_segments: List[dict], emoji_dir: Path) -> List
         used_emojis.add(emoji)
         last_emoji = emoji
         img_path = download_twemoji_png(emoji, emoji_dir)
-        line_count = int(chunk["line_count"])
-        last_line_text = str(chunk.get("last_line_text", "")).strip()
-        if not last_line_text:
-            last_line_text = str(chunk.get("raw_text", "")).strip()
+        display_text = format_caption_multiline(
+            random_caps_text(str(chunk.get("raw_text", "")).strip()),
+            max_words_per_line=3,
+            max_chars_per_line=16,
+            max_lines=3,
+        )
+        display_lines = [ln for ln in display_text.split("\n") if ln.strip()]
+        line_count = max(1, len(display_lines))
+        last_line_text = display_lines[-1] if display_lines else str(chunk.get("raw_text", "")).strip()
         last_line_w = estimate_line_width_px(last_line_text, font_size=font_size)
         line_left_x = int(caption_center_x - (last_line_w / 2.0))
-        # Slightly pull left so emoji feels attached to last character.
-        right_edge = line_left_x + last_line_w - int(font_size * 0.10)
+        # Rely on explicit padding instead of pulling into the final word.
+        right_edge = line_left_x + last_line_w
         trailing_char = last_line_text[-1] if last_line_text else ""
         punct_extra = int(font_size * 0.12) if trailing_char in ".!?,;:" else 0
         x_inline = right_edge + padding + punct_extra
@@ -994,7 +1140,8 @@ def build_filter_complex(
         "setpts=PTS-STARTPTS,"
         "setpts=0.5*PTS,"
         "scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920"
+        "crop=1080:1920,"
+        "fps=60"
         "[v0]"
     )
 
@@ -1170,7 +1317,7 @@ def compose_video(
         + f"-filter_complex {shlex.quote(filter_complex)} "
         + f"-map [vout] {audio_map}"
         + "-map_metadata -1 -map_chapters -1 "
-        + "-c:v libx264 -preset medium -crf 20 "
+        + "-c:v libx264 -preset medium -crf 20 -r 60 "
         + "-c:a aac -b:a 160k "
         + f"-metadata comment={shlex.quote(unique_mux_token)} "
         + "-movflags +faststart "
@@ -1185,7 +1332,7 @@ def compose_video(
             + f"-filter_complex {shlex.quote(filter_complex)} "
             + f"-map [vout] {audio_map}-map {subtitle_input_index}:0 "
             + "-map_metadata -1 -map_chapters -1 "
-            + "-c:v libx264 -preset medium -crf 20 "
+            + "-c:v libx264 -preset medium -crf 20 -r 60 "
             + "-c:a aac -b:a 160k "
             + "-c:s mov_text "
             + "-metadata:s:s:0 language=eng "
@@ -1343,6 +1490,29 @@ def main() -> None:
         default="cloner",
         choices=["cloner", "openai"],
         help="Narration engine: cloner (local Adam voice) or openai (cloud-friendly).",
+    )
+    parser.add_argument(
+        "--dynamic-speed",
+        action="store_true",
+        help='Apply speed ramps around phrases inside double quotes or --double hyphens--, then re-transcribe for final subtitle sync.',
+    )
+    parser.add_argument(
+        "--speed-ramp-ms",
+        type=int,
+        default=600,
+        help="How long the speed ramps take to glide in/out, in milliseconds.",
+    )
+    parser.add_argument(
+        "--speed-slow",
+        type=float,
+        default=0.60,
+        help="Slow speed factor during highlighted words (default: 0.60).",
+    )
+    parser.add_argument(
+        "--speed-fast",
+        type=float,
+        default=1.15,
+        help="Base speed factor outside highlights (default: 1.15).",
     )
     parser.add_argument("--upload", action="store_true", help="Upload the output video to YouTube")
     parser.add_argument("--privacy", default="public", choices=["private", "unlisted", "public"], help="public = Shorts feed; private = no impressions")
@@ -1503,7 +1673,26 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
-        narration_file = raw_narration_file
+        if args.dynamic_speed and re.search(r'"[^"]+"|“[^”]+”|--([^-][\s\S]*?[^-])--', script):
+            if client is None:
+                raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
+            print("Applying dynamic speed ramps from quoted / --hyphen-wrapped-- phrases...")
+            raw_words = get_whisper_word_timestamps(client, raw_narration_file)
+            highlights = get_highlight_timestamps(script, raw_words)
+            if highlights:
+                smart_speed_ramp(
+                    input_path=raw_narration_file,
+                    output_path=narration_file,
+                    interesting_segments=highlights,
+                    ramp_ms=args.speed_ramp_ms,
+                    slow_factor=args.speed_slow,
+                    fast_factor=args.speed_fast,
+                )
+            else:
+                print("No matching quoted or --hyphen-wrapped-- timestamps found; using raw narration.")
+                shutil.copyfile(raw_narration_file, narration_file)
+        else:
+            narration_file = raw_narration_file
         if client is not None:
             narration_reference_segments = get_whisper_word_timestamps(client, narration_file)
 
