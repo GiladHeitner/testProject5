@@ -108,7 +108,7 @@ jobs:
       - name: Generate and upload short
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: ./run.sh --topic "$TOPIC"
+        run: ./run.sh --topic "$TOPIC" --dynamic-speed
 
       - name: Save used-topic state
         run: |
