@@ -587,6 +587,7 @@ My crush kissed me. --No, I'm not kidding--. Okay, quick recap. Last time she hu
 ---
 
 STYLE RULES (match these exactly):
+- have an antognist and make the viewers want me to win
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
 - The video is going to be posted on shorts so it auto loops so make sure the last line loops into the first line without repeating the first line it should sound unfinished unless you hear the first line again
