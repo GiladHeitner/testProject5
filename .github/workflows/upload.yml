@@ -44,9 +44,9 @@ jobs:
           . .venv/bin/activate
           python -m pip install -q gdown
           mkdir -p assets/gameplay
-          gdown --fuzzy "https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7/view?usp=sharing" \
+          gdown "https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7/view?usp=sharing" \
             -O assets/gameplay/workflow_part00.mov
-          gdown --fuzzy "https://drive.google.com/file/d/1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p/view?usp=sharing" \
+          gdown "https://drive.google.com/file/d/1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p/view?usp=sharing" \
             -O assets/gameplay/workflow_part01.mov
           ls -lh assets/gameplay/
 
