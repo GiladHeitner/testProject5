@@ -18,6 +18,9 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydub import AudioSegment
+import resource
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (1024, hard))
 
 try:
     from bing_image_downloader import downloader as bing_downloader
@@ -90,6 +93,8 @@ def smart_speed_ramp(
     bitrate: str = "320k",
 ) -> None:
     audio = AudioSegment.from_file(input_path)
+    padding = AudioSegment.silent(duration=200)
+    audio = padding + audio
     frame_rate = audio.frame_rate
     total_ms = len(audio)
     out = AudioSegment.empty()
@@ -322,7 +327,7 @@ def estimate_line_width_px(line_text: str, font_size: int = 100) -> int:
     return int(width * font_size)
 
 
-def split_caption_chunks(segments: List[dict], words_per_chunk: int = 2) -> List[dict]:
+def split_caption_chunks(segments: List[dict], words_per_chunk: int = 1) -> List[dict]:
     """
     Turn uneven Whisper segments into steady Shorts caption beats.
     """
@@ -348,7 +353,7 @@ def split_caption_chunks(segments: List[dict], words_per_chunk: int = 2) -> List
             c_end = end_s if idx == len(pieces) - 1 else (c_start + chunk_duration)
             emoji = pick_emoji_for_text(piece)
             caption_text = format_caption_multiline(
-                piece, max_words_per_line=3, max_chars_per_line=16, max_lines=2
+                piece, max_words_per_line=1, max_chars_per_line=16, max_lines=2
             )
             lines = [ln for ln in caption_text.split("\n") if ln.strip()]
             last_line = lines[-1] if lines else piece
@@ -416,7 +421,7 @@ def write_ass_from_segments(segments: List[dict], out_path: Path) -> None:
             end_s = start_s + 0.25
         text = escape_ass_text(
             format_caption_multiline(
-                random_caps_text(raw_text), max_words_per_line=3, max_chars_per_line=16, max_lines=2
+                random_caps_text(raw_text), max_words_per_line=1, max_chars_per_line=16, max_lines=2
             )
         )
         text = format_bold_ass(text)
@@ -769,7 +774,7 @@ def build_whisper_prompt(script_text: str) -> str:
 def build_caption_chunks_from_word_timestamps(
     script_text: str,
     word_timestamps: List[dict],
-    words_per_chunk: int = 5,
+    words_per_chunk: int = 1,
 ) -> List[dict]:
     clean_script = script_words_for_alignment(script_text)
     if not clean_script or not word_timestamps:
@@ -901,7 +906,7 @@ def transcribe_audio_to_srt(
         caption_chunks = build_caption_chunks_from_word_timestamps(
             script_text,
             word_timestamps,
-            words_per_chunk=5,
+            words_per_chunk=1,
         )
         if not caption_chunks:
             remapped = remap_script_to_reference_timing(strip_script_markup(script_text), no_emoji_segments)
@@ -909,7 +914,7 @@ def transcribe_audio_to_srt(
                 no_emoji_segments = remapped
 
     if not caption_chunks:
-        caption_chunks = split_caption_chunks(no_emoji_segments, words_per_chunk=5)
+        caption_chunks = split_caption_chunks(no_emoji_segments, words_per_chunk=1)
     ass_segments = [
         {"start": c["start"], "end": c["end"], "raw_text": c["raw_text"]}
         for c in caption_chunks
@@ -1184,16 +1189,16 @@ def build_emoji_overlays(subtitle_segments: List[dict], emoji_dir: Path) -> List
     screen_padding = 56
     safety_padding = 90
     # Match ASS caption chunking exactly so emoji placement stays aligned.
-    for chunk in split_caption_chunks(subtitle_segments, words_per_chunk=5):
+    for chunk in split_caption_chunks(subtitle_segments, words_per_chunk=1):
         emoji = pick_non_repeating_emoji(str(chunk["raw_text"]), used_emojis, last_emoji)
         used_emojis.add(emoji)
         last_emoji = emoji
         img_path = download_twemoji_png(emoji, emoji_dir)
         display_text = format_caption_multiline(
             random_caps_text(str(chunk.get("raw_text", "")).strip()),
-            max_words_per_line=3,
+            max_words_per_line=1,
             max_chars_per_line=16,
-            max_lines=3,
+            max_lines=2,
         )
         display_lines = [ln for ln in display_text.split("\n") if ln.strip()]
         line_count = max(1, len(display_lines))

@@ -67,7 +67,11 @@ def stylize_narration_audio(
         "loudnorm=I=-16:TP=-1.5:LRA=9",
         ]
     )
-    filter_chain = f"{speed_chain},{master_chain}"
+    # Prime dynamics filters with a tiny leading pad so they don't swallow
+    # the first hard consonant, then trim that pad back off at the end.
+    padding_start = "adelay=200|200"
+    trim_start = "atrim=start=0.2"
+    filter_chain = f"{padding_start},{speed_chain},{master_chain},{trim_start}"
     cmd = (
         f"ffmpeg -y -i {shlex.quote(str(in_audio_path))} "
         f"-filter:a {shlex.quote(filter_chain)} "
@@ -84,7 +88,7 @@ def stylize_narration_audio(
             f"aresample=44100,"
             f"{build_atempo_chain(tempo_after_pitch)}"
         )
-        fallback_filter = f"{fallback_speed_chain},{master_chain}"
+        fallback_filter = f"{padding_start},{fallback_speed_chain},{master_chain},{trim_start}"
         fallback_cmd = (
             f"ffmpeg -y -i {shlex.quote(str(in_audio_path))} "
             f"-filter:a {shlex.quote(fallback_filter)} "
