@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import requests
 from dotenv import load_dotenv
@@ -39,6 +39,13 @@ class PopupImage:
     play_sfx: bool = False
     use_fade: bool = True
     is_emoji: bool = False
+
+
+@dataclass(frozen=True)
+class Word:
+    text: str
+    start: float
+    end: float
 
 
 def respeed(segment: AudioSegment, speed_factor: float, output_frame_rate: int) -> AudioSegment:
@@ -197,6 +204,138 @@ def run(command: str) -> str:
             f"Command failed ({result.returncode}): {command}\n{result.stderr.strip()}"
         )
     return result.stdout.strip()
+
+
+def transcribe_words(
+    audio_path: Path,
+    model_name: str = "medium",
+    device: str = "cpu",
+    compute_type: str = "int8",
+) -> List[Word]:
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing `faster-whisper`. Install it with `pip install faster-whisper`."
+        ) from exc
+
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    segments, _info = model.transcribe(
+        str(audio_path),
+        word_timestamps=True,
+        vad_filter=True,
+    )
+
+    out: List[Word] = []
+    for seg in segments:
+        if not getattr(seg, "words", None):
+            continue
+        for word in seg.words:
+            text = (word.word or "").strip()
+            if not text:
+                continue
+            out.append(
+                Word(
+                    text=text,
+                    start=float(word.start),
+                    end=float(word.end),
+                )
+            )
+    if not out:
+        raise RuntimeError("No words produced from transcription.")
+    return out
+
+
+def _ass_ts(total_seconds: float) -> str:
+    total_seconds = max(0.0, float(total_seconds))
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+    centiseconds = int(round((total_seconds - math.floor(total_seconds)) * 100))
+    if centiseconds == 100:
+        centiseconds = 0
+        seconds += 1
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+
+
+def _sanitize_ass_text(text: str) -> str:
+    return text.replace("\\", "").replace("{", "").replace("}", "")
+
+
+def _maybe_upper(token: str, ratio: float) -> str:
+    ratio = float(ratio or 0.0)
+    if ratio <= 0:
+        return token
+    if ratio >= 1:
+        return token.upper()
+    if not any(ch.isalnum() for ch in token):
+        return token
+    return token.upper() if random.random() < ratio else token
+
+
+def write_karaoke_block_ass(
+    words: Sequence[Word],
+    out_ass: Path,
+    *,
+    words_per_block: int = 3,
+    uppercase_ratio: float = 0.15,
+    play_res_x: int = 1080,
+    play_res_y: int = 1920,
+    y: int = 520,
+    font: str = "Gibson",
+    font_size: int = 100,
+) -> None:
+    out_ass.parent.mkdir(parents=True, exist_ok=True)
+    x = play_res_x // 2
+    words_per_block = max(2, int(words_per_block))
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {play_res_x}
+PlayResY: {play_res_y}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,0,8,180,180,520,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    override = (
+        rf"{{\an8\pos({x},{y})"
+        r"\bord7\shad0\3c&H000000&\4c&H000000&"
+        r"\1c&HFFFFFF&}"
+    )
+
+    lines: List[str] = [header]
+    idx = 0
+    while idx < len(words):
+        chunk = words[idx : idx + words_per_block]
+        if not chunk:
+            break
+
+        chunk_tokens = [
+            _maybe_upper(_sanitize_ass_text(word.text.strip()), uppercase_ratio)
+            for word in chunk
+        ]
+        for current_idx, word in enumerate(chunk):
+            start = _ass_ts(word.start)
+            end = _ass_ts(max(word.end, word.start + 0.05))
+            parts: List[str] = []
+            for token_idx, token in enumerate(chunk_tokens):
+                if token_idx == current_idx:
+                    parts.append(r"{\1c&H00FFFF&}" + token + r"{\1c&HFFFFFF&}")
+                else:
+                    parts.append(token)
+            lines.append(
+                f"Dialogue: 0,{start},{end},Default,,0,0,0,,{override}{' '.join(parts)}\n"
+            )
+
+        idx += words_per_block
+
+    out_ass.write_text("".join(lines), encoding="utf-8")
 
 
 def ffmpeg_has_subtitles_filter() -> bool:
@@ -839,96 +978,34 @@ def build_caption_chunks_from_word_timestamps(
 
 
 def transcribe_audio_to_srt(
-    client: OpenAI,
+    client: OpenAI | None,
     audio_path: Path,
     out_srt_path: Path,
     script_text: str = "",
     reference_segments: List[dict] | None = None,
 ) -> Tuple[List[dict], List[dict]]:
-    normalized: List[dict] = []
-    whisper_prompt = build_whisper_prompt(script_text) if script_text else ""
+    del client, script_text, reference_segments
 
-    with audio_path.open("rb") as audio_file:
-        srt_text = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            response_format="srt",
-            prompt=whisper_prompt or None,
-        )
-    srt_raw = str(srt_text).strip()
-    if srt_raw:
-        tmp_srt = out_srt_path.with_suffix(".tmp.srt")
-        tmp_srt.write_text(srt_raw, encoding="utf-8")
-        normalized = read_srt_segments(tmp_srt)
-        tmp_srt.unlink(missing_ok=True)
-
-    if not normalized:
-        with audio_path.open("rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="verbose_json",
-                prompt=whisper_prompt or None,
-            )
-        segments = getattr(transcript, "segments", None)
-        if segments is None and isinstance(transcript, dict):
-            segments = transcript.get("segments")
-        if segments:
-            for seg in segments:
-                if isinstance(seg, dict):
-                    s_start = float(seg.get("start", 0.0))
-                    s_end = float(seg.get("end", s_start + 0.8))
-                    s_text = str(seg.get("text", "")).strip()
-                else:
-                    s_start = float(getattr(seg, "start", 0.0))
-                    s_end = float(getattr(seg, "end", s_start + 0.8))
-                    s_text = str(getattr(seg, "text", "")).strip()
-                if s_text:
-                    normalized.append({"start": s_start, "end": s_end, "text": s_text})
-
-    if not normalized:
+    words = transcribe_words(audio_path)
+    word_segments = [
+        {
+            "start": float(word.start),
+            "end": float(max(word.end, word.start + 0.05)),
+            "raw_text": word.text,
+            "text": word.text,
+        }
+        for word in words
+        if word.text.strip()
+    ]
+    if not word_segments:
         raise RuntimeError("No transcription segments returned; cannot build subtitles.")
 
-    no_emoji_segments = []
-    for seg in normalized:
-        start_s = float(seg["start"])
-        end_s = float(seg["end"])
-        clean = str(seg["text"]).strip()
-        if not clean:
-            continue
-        if end_s <= start_s:
-            end_s = start_s + 0.2
-        no_emoji_segments.append({"start": start_s, "end": end_s, "text": clean})
-
-    caption_chunks: List[dict] = []
-    if script_text:
-        word_timestamps = get_whisper_word_timestamps(client, audio_path, script_text)
-        caption_chunks = build_caption_chunks_from_word_timestamps(
-            script_text,
-            word_timestamps,
-            words_per_chunk=1,
-        )
-        if not caption_chunks:
-            remapped = remap_script_to_reference_timing(strip_script_markup(script_text), no_emoji_segments)
-            if remapped:
-                no_emoji_segments = remapped
-
-    if not caption_chunks:
-        caption_chunks = split_caption_chunks(no_emoji_segments, words_per_chunk=1)
-    ass_segments = [
-        {"start": c["start"], "end": c["end"], "raw_text": c["raw_text"]}
-        for c in caption_chunks
-    ]
-    srt_segments = [
-        {"start": c["start"], "end": c["end"], "text": c["raw_text"]}
-        for c in caption_chunks
-    ]
     if out_srt_path.suffix.lower() == ".ass":
-        write_ass_from_segments(ass_segments, out_srt_path)
-        write_srt_from_segments(srt_segments, out_srt_path.with_suffix(".srt"))
+        write_karaoke_block_ass(words, out_srt_path)
+        write_srt_from_segments(word_segments, out_srt_path.with_suffix(".srt"))
     else:
-        write_srt_from_segments(srt_segments, out_srt_path)
-    return [], ass_segments
+        write_srt_from_segments(word_segments, out_srt_path)
+    return [], word_segments
 
 
 def maybe_generate_images(
@@ -1880,9 +1957,6 @@ def main() -> None:
     )
     if not popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
-    if subtitle_segments:
-        emoji_popups = build_emoji_overlays(subtitle_segments, output_dir / "emoji_cache")
-        popups.extend(emoji_popups)
     burn_subtitles = ffmpeg_has_subtitles_filter()
     if not burn_subtitles:
         print("Subtitle burn-in unavailable in this ffmpeg build; exporting without burned subtitles.")

@@ -10,3 +10,4 @@ soundfile
 torch
 qwen-tts
 pydub
+faster-whisper
