@@ -787,6 +787,24 @@ Licensed under Creative Commons Attribution.
 Output ONLY the description, nothing else."""
 
 
+def strip_wrapping_quotes(text: str) -> str:
+    cleaned = (text or "").strip()
+    quote_pairs = [
+        ('"', '"'),
+        ("'", "'"),
+        ("“", "”"),
+        ("‘", "’"),
+    ]
+    changed = True
+    while changed and cleaned:
+        changed = False
+        for left, right in quote_pairs:
+            if cleaned.startswith(left) and cleaned.endswith(right) and len(cleaned) >= 2:
+                cleaned = cleaned[1:-1].strip()
+                changed = True
+    return cleaned
+
+
 def generate_metadata(client: OpenAI, script: str, include_description: bool = True) -> Tuple[str, str]:
     def _call(prompt: str) -> str:
         r = client.chat.completions.create(
@@ -796,7 +814,7 @@ def generate_metadata(client: OpenAI, script: str, include_description: bool = T
         )
         return (r.choices[0].message.content or "").strip()
 
-    title = _call(TITLE_PROMPT)
+    title = strip_wrapping_quotes(_call(TITLE_PROMPT))
     description = _call(DESCRIPTION_PROMPT) if include_description else ""
 
     if not title:
@@ -1046,7 +1064,12 @@ def maybe_generate_images(
         out_path.write_bytes(image_bytes)
 
 
-def choose_popup_images(images_dir: Path, video_duration: float, count: int = 3) -> List[PopupImage]:
+def choose_popup_images(
+    images_dir: Path,
+    video_duration: float,
+    count: int = 3,
+    popup_duration: float = 1.8,
+) -> List[PopupImage]:
     candidates = [
         p
         for p in images_dir.glob("*")
@@ -1059,8 +1082,7 @@ def choose_popup_images(images_dir: Path, video_duration: float, count: int = 3)
     popups = []
     for img in chosen_files:
         start = random.uniform(2.0, max(2.1, video_duration - 4.5))
-        duration = random.uniform(1.2, 2.4)
-        end = min(video_duration - 0.2, start + duration)
+        end = min(video_duration - 0.2, start + max(0.4, float(popup_duration)))
         width = 700
         x = (1080 - width) // 2
         y = 730
@@ -1125,6 +1147,7 @@ def choose_story_related_popups(
     planned_times: List[float] | None = None,
     min_gap: float = 3.0,
     max_gap: float = 6.0,
+    popup_duration: float = 1.8,
 ) -> List[PopupImage]:
     candidates = [
         p
@@ -1173,9 +1196,7 @@ def choose_story_related_popups(
                     chunk = caption_chunks[-1]
 
                 start = float(chunk["start"])
-                end = float(chunk["end"])
-                if end <= start:
-                    end = start + 0.2
+                end = min(video_duration - 0.05, start + max(0.4, float(popup_duration)))
                 width = 700
                 x = (1080 - width) // 2
                 y = 860
@@ -1208,7 +1229,7 @@ def choose_story_related_popups(
 
             for pause_start, pause_end in pause_windows:
                 start = max(0.0, pause_start + 0.02)
-                end = min(video_duration - 0.01, pause_end - 0.02)
+                end = min(video_duration - 0.05, start + max(0.4, float(popup_duration)))
                 if end <= start:
                     continue
                 width = 700
@@ -1232,8 +1253,7 @@ def choose_story_related_popups(
         idx = 0
         while t < max(1.0, video_duration - 0.3):
             img = ranked_images[idx % len(ranked_images)]
-            duration = random.uniform(1.3, 2.0)
-            end = min(video_duration - 0.05, t + duration)
+            end = min(video_duration - 0.05, t + max(0.4, float(popup_duration)))
             width = 700
             x = (1080 - width) // 2
             y = 860
