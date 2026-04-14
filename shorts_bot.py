@@ -146,7 +146,7 @@ def script_words_for_alignment(script_text: str) -> List[str]:
 
 
 def get_highlight_timestamps(script: str, words: List[dict]) -> List[Tuple[float, float]]:
-    phrase_matches = re.findall(r'"([^"]+)"|“([^”]+)”|--([^-][\s\S]*?[^-])--', script)
+    phrase_matches = re.findall(r'--([^-][\s\S]*?[^-])--', script)
     phrases = [
         (ascii_phrase or smart_phrase or hyphen_phrase).strip()
         for ascii_phrase, smart_phrase, hyphen_phrase in phrase_matches
