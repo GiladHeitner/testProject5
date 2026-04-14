@@ -146,12 +146,11 @@ def script_words_for_alignment(script_text: str) -> List[str]:
 
 
 def get_highlight_timestamps(script: str, words: List[dict]) -> List[Tuple[float, float]]:
-    phrase_matches = re.findall(r'--([^-][\s\S]*?[^-])--', script)
     phrases = [
-        (ascii_phrase or smart_phrase or hyphen_phrase).strip()
-        for ascii_phrase, smart_phrase, hyphen_phrase in phrase_matches
+        phrase.strip()
+        for phrase in re.findall(r'--([^-][\s\S]*?[^-])--', script)
+        if phrase.strip()
     ]
-    phrases = [phrase for phrase in phrases if phrase]
     if not phrases:
         return []
 
@@ -1174,102 +1173,37 @@ def choose_story_related_popups(
     if not ranked_images:
         return []
 
-    # Use GPT-planned beats when available; otherwise fallback to pauses/cadence.
+    del subtitle_segments
+
+    # Use fixed planned beats so popup timing is independent from subtitle timing.
     popups: List[PopupImage] = []
-    caption_chunks = split_caption_chunks(subtitle_segments or [])
-    if caption_chunks:
-        caption_chunks = sorted(caption_chunks, key=lambda c: float(c["start"]))
-        img_idx = 0
-        if planned_times:
-            for beat in planned_times:
-                chunk = None
-                for c in caption_chunks:
-                    if float(c["start"]) <= beat <= float(c["end"]):
-                        chunk = c
-                        break
-                if chunk is None:
-                    for c in caption_chunks:
-                        if float(c["start"]) >= beat:
-                            chunk = c
-                            break
-                if chunk is None:
-                    chunk = caption_chunks[-1]
-
-                start = float(chunk["start"])
-                end = min(video_duration - 0.05, start + max(0.4, float(popup_duration)))
-                width = 700
-                x = (1080 - width) // 2
-                y = 860
-                img = ranked_images[img_idx % len(ranked_images)]
-                popups.append(
-                    PopupImage(
-                        path=img,
-                        start_sec=start,
-                        end_sec=min(video_duration - 0.05, end),
-                        x=x,
-                        y=y,
-                        width=width,
-                        play_sfx=True,
-                    )
-                )
-                img_idx += 1
-        else:
-            pause_windows: List[tuple[float, float]] = []
-            first_start = float(caption_chunks[0]["start"])
-            if first_start > 0.08:
-                pause_windows.append((0.0, first_start))
-            for i in range(len(caption_chunks) - 1):
-                gap_start = float(caption_chunks[i]["end"])
-                gap_end = float(caption_chunks[i + 1]["start"])
-                if gap_end > gap_start + 0.08:
-                    pause_windows.append((gap_start, gap_end))
-            last_end = float(caption_chunks[-1]["end"])
-            if video_duration > last_end + 0.08:
-                pause_windows.append((last_end, video_duration))
-
-            for pause_start, pause_end in pause_windows:
-                start = max(0.0, pause_start + 0.02)
-                end = min(video_duration - 0.05, start + max(0.4, float(popup_duration)))
-                if end <= start:
-                    continue
-                width = 700
-                x = (1080 - width) // 2
-                y = 860
-                img = ranked_images[img_idx % len(ranked_images)]
-                popups.append(
-                    PopupImage(
-                        path=img,
-                        start_sec=start,
-                        end_sec=min(video_duration - 0.05, end),
-                        x=x,
-                        y=y,
-                        width=width,
-                        play_sfx=True,
-                    )
-                )
-                img_idx += 1
-    else:
+    beat_times = planned_times[:] if planned_times else []
+    if not beat_times:
         t = 0.8
-        idx = 0
         while t < max(1.0, video_duration - 0.3):
-            img = ranked_images[idx % len(ranked_images)]
-            end = min(video_duration - 0.05, t + max(0.4, float(popup_duration)))
-            width = 700
-            x = (1080 - width) // 2
-            y = 860
-            popups.append(
-                PopupImage(
-                    path=img,
-                    start_sec=t,
-                    end_sec=end,
-                    x=x,
-                    y=y,
-                    width=width,
-                    play_sfx=True,
-                )
-            )
-            idx += 1
+            beat_times.append(t)
             t += random.uniform(min_gap, max_gap)
+
+    for idx, beat in enumerate(beat_times):
+        start = max(0.0, float(beat))
+        end = min(video_duration - 0.05, start + max(1.0, float(popup_duration)))
+        if end <= start:
+            continue
+        width = 700
+        x = (1080 - width) // 2
+        y = 860
+        img = ranked_images[idx % len(ranked_images)]
+        popups.append(
+            PopupImage(
+                path=img,
+                start_sec=start,
+                end_sec=end,
+                x=x,
+                y=y,
+                width=width,
+                play_sfx=True,
+            )
+        )
     return sorted(popups, key=lambda p: p.start_sec)
 
 
@@ -1886,10 +1820,10 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
-        if args.dynamic_speed and re.search(r'"[^"]+"|“[^”]+”|--([^-][\s\S]*?[^-])--', script):
+        if args.dynamic_speed and re.search(r'--([^-][\s\S]*?[^-])--', script):
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
-            print("Applying dynamic speed ramps from quoted / --hyphen-wrapped-- phrases...")
+            print("Applying dynamic speed ramps from --hyphen-wrapped-- phrases...")
             raw_words = get_whisper_word_timestamps(client, raw_narration_file, script)
             highlights = get_highlight_timestamps(script, raw_words)
             if highlights:
@@ -1902,7 +1836,7 @@ def main() -> None:
                     fast_factor=args.speed_fast,
                 )
             else:
-                print("No matching quoted or --hyphen-wrapped-- timestamps found; using raw narration.")
+                print("No matching --hyphen-wrapped-- timestamps found; using raw narration.")
                 shutil.copyfile(raw_narration_file, narration_file)
         else:
             narration_file = raw_narration_file
