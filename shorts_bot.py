@@ -100,8 +100,6 @@ def smart_speed_ramp(
     bitrate: str = "320k",
 ) -> None:
     audio = AudioSegment.from_file(input_path)
-    padding = AudioSegment.silent(duration=200)
-    audio = padding + audio
     frame_rate = audio.frame_rate
     total_ms = len(audio)
     out = AudioSegment.empty()
@@ -723,29 +721,28 @@ def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
     prompt = f"""
 Write a YouTube Shorts storytime script about: {topic_line} Cater the story to a middle school audience.
 
-Use the EXACT same writing style, pacing, tone, and length as this example script:
+use this as example script follow the formatting:
+Bro, people who vape in school actually need to --be studied--. Like, why are you asking to use the bathroom 10 times in 20 minutes to hit your --cancer stick--? I swear if these addicts lost their vape for a second, they would search the end of the earth and start World War II just to find it. Like, bro, I don't think these people have ever breathed in air in their lifetime. The bad thing is that they think vaping is tough. I don't know about you, but filling my lungs up with chemical air is not tough. If I ever vaped and my mom or dad found out, I would be shipped out to --North Korea-- in a second. Subscribe and like.
 
----
-My crush kissed me. --No, I'm not kidding--. Okay, quick recap. Last time she hugged me after our walk and said, "See you tomorrow, --singer boy.--" That was 3 days ago, and we haven't stopped talking since. She texted me till midnight, walking home together, sharing songs. Somehow, she's already part of my everyday. First off, she posted a video of me singing on her story with a tiny red heart --right over my face.-- Yeah, my face. My friends went feral in the group chat. Yesterday at lunch, we were sitting together when two idiots from my class came up trying to be funny. One goes, "Hey, your girlfriend got room for one more." Before I could even answer, she smiles and goes, "Maybe ask your boyfriend first. He looks like the jealous type." --Bro, they froze.-- One muttered something and they both left. I was just sitting there laughing and half shocked. She looked at me and said, "What? I was saving you." Later that day, she texted, "You want to come over and study?" Of course, I said yes. We ended up doing way more laughing than studying. Sitting close, sharing snacks, making dumb jokes like always. Somehow, we ended up --half cuddled on the couch.-- The room quiet except for her playlist, softly playing. Then, I dropped my pen. I leaned down to grab it, and when I sat back up, --she was already looking at me.-- For a second, neither of us said anything. Then, she leaned in --and kissed me.-- Quick, soft. Then, she pulled back, met my eyes, smiled, and kissed me again. --Slower this time.-- It was honestly incredible. Like nothing else mattered for a second. I --don't even remember-- how I got home that night.
----
 
 STYLE RULES (match these exactly):
+- make the video anger people
 - have an antagonist and make the viewers want me an underdog to win
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
-- The video is going to be posted on shorts so it auto loops so make sure the last line loops into the first line without repeating the first line it should sound unfinished unless you hear the first line again
-- DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect (e.g., "--my iPad went flying--"). 
+- DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect.
 - FOCUS ON IMPACT: Do NOT wrap descriptive fluff or narrator asides (like "slow motion, like a movie"). Only wrap the actual event or the most shocking part of the sentence.
-- RAMP LENGTH: Only wrap short phrases of 2 to 5 words. Never wrap an entire sentence.
+- RAMP LENGTH: follow how the example script does it
 - RAMP SPACING: NEVER put hyphenated phrases back-to-back. You must space them out evenly throughout the script so the audio has time to return to normal speed between drops.
 - End the video by saying subscribe before I get --banned--!
 - Hook must have a high chance of being used in the title
-- First-person, past tense, told like you're talking to a best friend
+- Dont say you used to hate something you still hate something
+- First-person, past tense, told like you're talking to a best friend but they dont know anything in the past dont say remember my highschool bully
 - Fast-paced. Short punchy sentences. No filler.
 - Use quoted dialogue to bring scenes to life
 - Build tension and emotion beat by beat
 - End on a high — a moment that makes the viewer feel something
-- TARGET WORD COUNT: 85–115 words
+- TARGET WORD COUNT: 105–115 words
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
 - Research the topic to write authentically and specifically
 
@@ -919,6 +916,15 @@ def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_pa
         except Exception as exc:
             last_exc = exc
     raise RuntimeError(f"OpenAI TTS failed: {last_exc}")
+
+
+def prepend_silence_to_audio(audio_path: Path, duration_ms: int = 500) -> None:
+    if duration_ms <= 0:
+        return
+    audio = AudioSegment.from_file(audio_path)
+    padded = AudioSegment.silent(duration=duration_ms) + audio
+    export_format = audio_path.suffix.lstrip(".") or "mp3"
+    padded.export(audio_path, format=export_format)
 
 
 def build_whisper_prompt(script_text: str) -> str:
@@ -1820,6 +1826,7 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
+        prepend_silence_to_audio(raw_narration_file, duration_ms=500)
         if args.dynamic_speed and re.search(r'--([^-][\s\S]*?[^-])--', script):
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
