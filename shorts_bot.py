@@ -1826,7 +1826,7 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
-        prepend_silence_to_audio(raw_narration_file, duration_ms=500)
+        prepend_silence_to_audio(raw_narration_file, duration_ms=300)
         if args.dynamic_speed and re.search(r'--([^-][\s\S]*?[^-])--', script):
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
