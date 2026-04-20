@@ -39,6 +39,8 @@ class PopupImage:
     play_sfx: bool = False
     use_fade: bool = True
     is_emoji: bool = False
+    sfx_path: Path | None = None
+    preserve_aspect: bool = False
 
 
 @dataclass(frozen=True)
@@ -706,6 +708,202 @@ def pick_random_file(folder: Path, extensions: List[str]) -> Path:
     return random.choice(items)
 
 
+UNSPLASH_ACCESS_KEY = os.environ.get(
+    "UNSPLASH_ACCESS_KEY",
+    "3U8WmU73GKXwREspDQOKbf4e4mLGT4df4Bfp337klWQ",
+)
+
+
+def extract_hook_text(script: str) -> str:
+    cleaned = strip_script_markup(script)
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    hook_sentences = [s for s in sentences if s.strip()][:2]
+    hook = " ".join(hook_sentences).strip()
+    return hook or cleaned[:160]
+
+
+def summarize_script_for_image(client: OpenAI | None, script: str) -> str:
+    hook = extract_hook_text(script)
+    fallback = " ".join(hook.split()[:4]) or "story"
+    if client is None:
+        return fallback
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Turn this video HOOK into a 2-4 word photo search query that visually "
+                        "represents the hook's subject/setting. Nouns only. No punctuation. "
+                        "No people names.\n\nHOOK:\n"
+                        f"{hook}"
+                    ),
+                }
+            ],
+            temperature=0.3,
+        )
+        query = (resp.choices[0].message.content or "").strip().strip('"').strip()
+        query = re.sub(r"[^a-zA-Z0-9 ]", "", query)
+        return query or fallback
+    except Exception:
+        return fallback
+
+
+def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
+    cleaned = strip_script_markup(script)
+    fallback = (
+        f"A hyper-realistic, dramatic cinematic photo that visually summarizes this short "
+        f"story: {cleaned[:300]}. Vertical composition, no text, no captions, "
+        f"no logos, no watermark."
+    )
+    if client is None:
+        return fallback
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Write a single vivid DALL-E 3 image prompt that visually SUMMARIZES "
+                        "the whole short video below. "
+                        "Focus on one strong iconic scene that captures the main moment or punchline. "
+                        "Style: hyper-realistic cinematic photo, dramatic lighting, strong focal subject. "
+                        "Rules: no text, no captions, no logos, no watermark, no famous people. "
+                        "1-2 sentences, vivid nouns and adjectives only.\n\n"
+                        f"SCRIPT:\n{cleaned}"
+                    ),
+                }
+            ],
+            temperature=0.7,
+        )
+        prompt = (resp.choices[0].message.content or "").strip().strip('"').strip()
+        if not prompt:
+            return fallback
+        if "no text" not in prompt.lower():
+            prompt = f"{prompt} No text. No captions. No logos."
+        return prompt
+    except Exception:
+        return fallback
+
+
+def generate_hook_image_dalle(
+    client: OpenAI | None, script: str, out_dir: Path
+) -> Path | None:
+    if client is None:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prompt = build_dalle_prompt(client, script)
+    print(f"Hook image prompt: {prompt[:200]}")
+    try:
+        response = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size="1024x1024",
+            quality="low",
+            n=1,
+        )
+        data = getattr(response, "data", None) or []
+        if not data:
+            print("Image model returned no data.")
+            return None
+        entry = data[0]
+        out_path = out_dir / f"hook_ai_{int(time.time())}.png"
+        b64 = getattr(entry, "b64_json", None)
+        image_url = getattr(entry, "url", None)
+        if b64:
+            import base64
+            out_path.write_bytes(base64.b64decode(b64))
+        elif image_url:
+            image_response = requests.get(image_url, timeout=60)
+            if image_response.status_code != 200:
+                print(f"Image download failed: {image_response.status_code}")
+                return None
+            out_path.write_bytes(image_response.content)
+        else:
+            print("Image model returned neither b64_json nor url.")
+            return None
+        return out_path
+    except Exception as exc:
+        print(f"Hook image generation error: {exc}")
+        return None
+
+
+def _unsplash_search(query: str) -> list | None:
+    if not UNSPLASH_ACCESS_KEY:
+        return None
+    try:
+        response = requests.get(
+            "https://api.unsplash.com/search/photos",
+            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+            params={
+                "query": query,
+                "per_page": 15,
+                "orientation": "portrait",
+                "content_filter": "high",
+                "order_by": "relevant",
+            },
+            timeout=30,
+        )
+        if response.status_code != 200:
+            print(f"Unsplash search failed ({response.status_code}): {response.text[:200]}")
+            return None
+        return (response.json().get("results") or []) or []
+    except Exception as exc:
+        print(f"Unsplash fetch error: {exc}")
+        return None
+
+
+def fetch_unsplash_hook_image(query: str, out_dir: Path) -> Path | None:
+    if not UNSPLASH_ACCESS_KEY:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Try the full query, then progressively simpler fallbacks so an empty result
+    # set never leaves the hook with no image.
+    tried: list[str] = []
+    candidates = [query]
+    words = [w for w in query.split() if w]
+    if len(words) >= 2:
+        candidates.append(" ".join(words[:2]))
+    if words:
+        candidates.append(words[0])
+    candidates.append("mood")
+
+    results = []
+    final_query = query
+    for attempt in candidates:
+        if not attempt or attempt in tried:
+            continue
+        tried.append(attempt)
+        attempt_results = _unsplash_search(attempt)
+        if attempt_results:
+            results = attempt_results
+            final_query = attempt
+            break
+    if not results:
+        print(f"Unsplash returned no images for any query (tried: {tried}).")
+        return None
+
+    top_relevant = results[:8]
+    best = max(top_relevant, key=lambda r: int(r.get("likes") or 0))
+    image_url = best.get("urls", {}).get("regular")
+    if not image_url:
+        return None
+    try:
+        image_response = requests.get(image_url, timeout=60)
+        if image_response.status_code != 200:
+            return None
+    except Exception as exc:
+        print(f"Unsplash download error: {exc}")
+        return None
+    safe_query = re.sub(r"[^a-zA-Z0-9]+", "_", final_query)[:40] or "hook"
+    out_path = out_dir / f"hook_{safe_query}.jpg"
+    out_path.write_bytes(image_response.content)
+    return out_path
+
+
 def print_progress(step: int, total: int, label: str) -> None:
     width = 24
     filled = int(width * step / total)
@@ -719,20 +917,19 @@ def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
     high = int(target_words * 1.15)
     topic_line = topic.strip() or "a relatable personal story about a social situation"
     prompt = f"""
-Write a YouTube Shorts storytime script about: {topic_line} Cater the story to a middle school audience.
+this is the hook of a youtube shorts story {topic_line} keep the hook as it is and continue the story Cater the story to a middle school audience.
 
 use this as example script follow the formatting:
-Bro, people who vape in school actually need to --be studied--. Like, why are you asking to use the bathroom 10 times in 20 minutes to hit your --cancer stick--? I swear if these addicts lost their vape for a second, they would search the end of the earth and start World War II just to find it. Like, bro, I don't think these people have ever breathed in air in their lifetime. The bad thing is that they think vaping is tough. I don't know about you, but filling my lungs up with chemical air is not tough. If I ever vaped and my mom or dad found out, I would be shipped out to --North Korea-- in a second. Subscribe and like.
-
+Back in middle school, me and my friends actually made our own secret language to pass notes. At first, we tried writing backwards, so if teachers or classmates tried to peak, they couldn't read it quickly. But then we realized if our notebooks ever got confiscated, it would still be easy to figure out. So, we went full spo. We created a whole alphabet, gave each letter its own symbol, and memorized it. Suddenly, we could write full conversations in class, and no one had a clue what we were saying. By high school, we didn't really use it anymore, but I still had all the symbols memorized. One day, I was in class journaling about a crush in the back of my notebook. I wasn't disrupting anyone, but my teacher noticed how into it I was and decided to call me out. He goes, "What are you writing a book over there?" >> Clearly, those aren't notes.
+>> I froze, snapped the notebook shut immediately. Thankfully, he just made his little joke and moved on. But there was no way I was about to risk my thoughts about this girl being read out loud to the whole class. So the next time I journaled, I switched back to the secret language. To everyone else, it looked like I was just doodling random symbols. But to me, it was the perfect cover. Fast forward years later, I find those old notebooks again. And the problem? I had thrown away the only translator we ever made, which means all the secrets I wrote as a kid are now locked away forever in a language even I don't understand anymore. Guys, what do I
 
 STYLE RULES (match these exactly):
 - make the video anger people
-- have an antagonist and make the viewers want me an underdog to win
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
 - DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect.
 - FOCUS ON IMPACT: Do NOT wrap descriptive fluff or narrator asides (like "slow motion, like a movie"). Only wrap the actual event or the most shocking part of the sentence.
-- RAMP LENGTH: follow how the example script does it
+- RAMP LENGTH: two word max wrapping
 - RAMP SPACING: NEVER put hyphenated phrases back-to-back. You must space them out evenly throughout the script so the audio has time to return to normal speed between drops.
 - End the video by saying subscribe before I get --banned--!
 - Hook must have a high chance of being used in the title
@@ -742,7 +939,7 @@ STYLE RULES (match these exactly):
 - Use quoted dialogue to bring scenes to life
 - Build tension and emotion beat by beat
 - End on a high — a moment that makes the viewer feel something
-- TARGET WORD COUNT: 105–115 words
+- TARGET WORD COUNT: 105–125 words
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
 - Research the topic to write authentically and specifically
 
@@ -1069,7 +1266,7 @@ def choose_popup_images(
     candidates = [
         p
         for p in images_dir.glob("*")
-        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     ]
     if not candidates:
         return []
@@ -1148,7 +1345,7 @@ def choose_story_related_popups(
     candidates = [
         p
         for p in story_images_dir.glob("*")
-        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     ]
     if not candidates:
         return []
@@ -1280,9 +1477,9 @@ def build_filter_complex(
     chains.append(
         "[0:v]"
         f"{crop_prefix}"
-        f"trim=start={start_time:.3f}:duration={total_duration * 2.0:.3f},"
+        f"trim=start={start_time:.3f}:duration={total_duration * 4.0:.3f},"
         "setpts=PTS-STARTPTS,"
-        "setpts=0.5*PTS,"
+        "setpts=0.25*PTS,"
         "scale=1080:1920:force_original_aspect_ratio=increase,"
         "crop=1080:1920,"
         "fps=60"
@@ -1298,7 +1495,7 @@ def build_filter_complex(
                 f"[{i + 2}:v]"
                 + (
                     f"scale={popup.width}:-1,"
-                    if popup.is_emoji
+                    if (popup.is_emoji or popup.preserve_aspect)
                     else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
                 )
                 + 
@@ -1311,7 +1508,7 @@ def build_filter_complex(
                 f"[{i + 2}:v]"
                 + (
                     f"scale={popup.width}:-1,"
-                    if popup.is_emoji
+                    if (popup.is_emoji or popup.preserve_aspect)
                     else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
                 )
                 +
@@ -1345,26 +1542,106 @@ def build_filter_complex(
     return ";".join(chains)
 
 
+def _two_pass_loudnorm(src: Path, dst: Path) -> bool:
+    target = "I=-16:TP=-1.5:LRA=11"
+    measure_cmd = (
+        f"ffmpeg -hide_banner -nostats -i {shlex.quote(str(src))} "
+        f"-af loudnorm={target}:print_format=json -f null -"
+    )
+    try:
+        result = subprocess.run(
+            measure_cmd, shell=True, capture_output=True, text=True, check=False
+        )
+    except Exception as exc:
+        print(f"Loudnorm measure failed for {src.name}: {exc}")
+        return False
+    stderr = result.stderr or ""
+    json_match = re.search(r"\{[\s\S]*?\}", stderr)
+    if not json_match:
+        print(f"Could not parse loudnorm output for {src.name}")
+        return False
+    try:
+        stats = json.loads(json_match.group(0))
+    except json.JSONDecodeError:
+        return False
+    measured = (
+        f"measured_I={stats.get('input_i')}:"
+        f"measured_LRA={stats.get('input_lra')}:"
+        f"measured_TP={stats.get('input_tp')}:"
+        f"measured_thresh={stats.get('input_thresh')}:"
+        f"offset={stats.get('target_offset')}"
+    )
+    apply_filter = f"loudnorm={target}:{measured}:linear=true:print_format=summary"
+    apply_cmd = (
+        f"ffmpeg -y -hide_banner -i {shlex.quote(str(src))} "
+        f"-af {shlex.quote(apply_filter)} -ar 48000 -c:a libmp3lame -q:a 2 "
+        f"{shlex.quote(str(dst))}"
+    )
+    try:
+        subprocess.run(apply_cmd, shell=True, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"Loudnorm apply failed for {src.name}: {exc.stderr[:200] if exc.stderr else exc}")
+        return False
+    return True
+
+
+def ensure_normalized_sounds(src_dir: Path, dst_dir: Path) -> Path:
+    if not src_dir.exists():
+        return src_dir
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    audio_exts = {".mp3", ".wav", ".m4a", ".ogg"}
+    for src in sorted(src_dir.iterdir()):
+        if not src.is_file() or src.suffix.lower() not in audio_exts:
+            continue
+        dst = dst_dir / (src.stem + ".mp3")
+        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+            continue
+        print(f"Normalizing {src.name} ...")
+        if not _two_pass_loudnorm(src, dst):
+            shutil.copyfile(src, dst)
+    return dst_dir
+
+
+def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
+    if not sounds_dir.exists():
+        return
+    all_sounds = sorted(
+        p for p in sounds_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"}
+    )
+    if not all_sounds:
+        return
+    for popup in popups:
+        if not popup.play_sfx:
+            continue
+        popup.sfx_path = random.choice(all_sounds)
+
+
 def build_popup_sfx_audio_chain(
     popups: List[PopupImage],
-    sfx_input_index: int,
+    sfx_input_indices: dict,
     sfx_trim_seconds: float = 1.4,
     sfx_speed: float = 1.25,
     sfx_volume: float = 0.2,
 ) -> str:
-    sfx_events = [p for p in popups if p.play_sfx]
+    sfx_events = [p for p in popups if p.play_sfx and p.sfx_path is not None]
     if not sfx_events:
         return ""
 
     chains = ["[1:a]aresample=44100,volume=1.0[abase]"]
     for i, popup in enumerate(sfx_events):
+        sfx_idx = sfx_input_indices.get(str(popup.sfx_path))
+        if sfx_idx is None:
+            continue
         delay_ms = max(0, int(popup.start_sec * 1000))
         trim_s = max(0.15, float(sfx_trim_seconds))
         speed = min(2.0, max(0.5, float(sfx_speed)))
         vol = max(0.0, float(sfx_volume))
         chains.append(
-            f"[{sfx_input_index}:a]"
-            f"atrim=0:{trim_s:.2f},asetpts=N/SR/TB,atempo={speed:.2f},volume={vol:.2f},adelay={delay_ms}|{delay_ms}"
+            f"[{sfx_idx}:a]"
+            f"atrim=0:{trim_s:.2f},asetpts=N/SR/TB,"
+            f"atempo={speed:.2f},volume={vol:.2f},"
+            f"adelay={delay_ms}|{delay_ms}"
             f"[boom{i}]"
         )
     mix_inputs = "[abase]" + "".join(f"[boom{i}]" for i in range(len(sfx_events)))
@@ -1385,7 +1662,7 @@ def compose_video(
     popup_sfx_path: Path | None = None,
     popup_sfx_trim_seconds: float = 1.4,
     popup_sfx_speed: float = 1.25,
-    popup_sfx_volume: float = 0.18,
+    popup_sfx_volume: float = 0.55,
     bgm_path: Path | None = None,
     bgm_volume: float = 0.08,
     source_top_crop: int = 96,
@@ -1393,7 +1670,7 @@ def compose_video(
     narration_duration = ffprobe_duration_seconds(narration_path)
     target_duration = duration_seconds if duration_seconds is not None else narration_duration
     gameplay_duration = ffprobe_duration_seconds(gameplay_path)
-    required_source_duration = target_duration * 2.0
+    required_source_duration = target_duration * 4.0
     unique_mux_token = str(time.time_ns())
 
     if gameplay_duration <= required_source_duration + 0.5:
@@ -1415,13 +1692,33 @@ def compose_video(
         f"-i {shlex.quote(str(narration_path))}",
     ]
     for popup in popup_images:
-        input_parts.append(f"-loop 1 -t {target_duration:.3f} -i {shlex.quote(str(popup.path))}")
-    popup_sfx_input_index = -1
-    if popup_sfx_path is not None and popup_sfx_path.exists() and any(
+        if popup.path.suffix.lower() == ".gif":
+            input_parts.append(
+                f"-ignore_loop 0 -t {target_duration:.3f} -i {shlex.quote(str(popup.path))}"
+            )
+        else:
+            input_parts.append(
+                f"-loop 1 -t {target_duration:.3f} -i {shlex.quote(str(popup.path))}"
+            )
+    sfx_input_indices: dict = {}
+    unique_sfx_paths = []
+    seen_sfx = set()
+    for popup in popup_images:
+        if popup.play_sfx and popup.sfx_path is not None and popup.sfx_path.exists():
+            key = str(popup.sfx_path)
+            if key not in seen_sfx:
+                seen_sfx.add(key)
+                unique_sfx_paths.append(popup.sfx_path)
+    if not unique_sfx_paths and popup_sfx_path is not None and popup_sfx_path.exists() and any(
         p.play_sfx for p in popup_images
     ):
-        input_parts.append(f"-i {shlex.quote(str(popup_sfx_path))}")
-        popup_sfx_input_index = len(input_parts) - 1
+        unique_sfx_paths.append(popup_sfx_path)
+        for popup in popup_images:
+            if popup.play_sfx and popup.sfx_path is None:
+                popup.sfx_path = popup_sfx_path
+    for sfx_path in unique_sfx_paths:
+        input_parts.append(f"-i {shlex.quote(str(sfx_path))}")
+        sfx_input_indices[str(sfx_path)] = len(input_parts) - 1
     bgm_input_index = -1
     if bgm_path is not None and bgm_path.exists():
         input_parts.append(f"-stream_loop -1 -i {shlex.quote(str(bgm_path))}")
@@ -1432,10 +1729,10 @@ def compose_video(
 
     current_audio_label = "1:a"
     audio_map = "-map 1:a "
-    if popup_sfx_input_index >= 0:
+    if sfx_input_indices:
         audio_chain = build_popup_sfx_audio_chain(
             popup_images,
-            popup_sfx_input_index,
+            sfx_input_indices,
             sfx_trim_seconds=popup_sfx_trim_seconds,
             sfx_speed=popup_sfx_speed,
             sfx_volume=popup_sfx_volume,
@@ -1684,14 +1981,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--popup-sfx",
-        default="assets/vine-boom.mp3",
-        help="Sound effect played when story-related popup images appear",
+        default="assets/sounds/vine-boom.mp3",
+        help="Fallback sound effect if assets/sounds folder is empty",
     )
     parser.add_argument(
         "--popup-sfx-volume",
         type=float,
-        default=0.18,
-        help="Vine boom volume multiplier (default: 0.18)",
+        default=0.55,
+        help="Popup SFX volume multiplier (default: 0.55)",
     )
     parser.add_argument(
         "--popup-sfx-speed",
@@ -1908,6 +2205,50 @@ def main() -> None:
     )
     if not popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
+
+    hook_image_path = generate_hook_image_dalle(client, script, output_dir / "hook_image")
+    if hook_image_path is None or not hook_image_path.exists():
+        hook_query = summarize_script_for_image(client, script)
+        print(f"Falling back to Unsplash search: {hook_query!r}")
+        hook_image_path = fetch_unsplash_hook_image(hook_query, output_dir / "hook_image")
+    if hook_image_path is None or not hook_image_path.exists():
+        fallback_dirs = [story_images_dir, images_dir]
+        fallback_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        fallback_candidates = []
+        for folder in fallback_dirs:
+            if folder.exists():
+                fallback_candidates.extend(
+                    p for p in folder.iterdir()
+                    if p.is_file() and p.suffix.lower() in fallback_exts
+                )
+        if fallback_candidates:
+            hook_image_path = random.choice(fallback_candidates)
+            print(f"Using local fallback hook image: {hook_image_path.name}")
+        else:
+            hook_image_path = None
+    if hook_image_path is not None and hook_image_path.exists():
+        hook_duration = 1.5
+        hook_width = 700
+        hook_x = (1080 - hook_width) // 2
+        hook_y = 860
+        hook_popup = PopupImage(
+            path=hook_image_path,
+            start_sec=0.0,
+            end_sec=min(narration_duration - 0.05, hook_duration),
+            x=hook_x,
+            y=hook_y,
+            width=hook_width,
+            play_sfx=False,
+            use_fade=True,
+        )
+        popups = [hook_popup] + [p for p in popups if p.start_sec >= hook_popup.end_sec]
+
+    normalized_sounds_dir = ensure_normalized_sounds(
+        project_root / "assets" / "sounds",
+        project_root / "assets" / "sounds_normalized",
+    )
+    pick_sfx_for_popups(popups, normalized_sounds_dir)
+
     burn_subtitles = ffmpeg_has_subtitles_filter()
     if not burn_subtitles:
         print("Subtitle burn-in unavailable in this ffmpeg build; exporting without burned subtitles.")
