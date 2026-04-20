@@ -918,15 +918,6 @@ def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_pa
     raise RuntimeError(f"OpenAI TTS failed: {last_exc}")
 
 
-def prepend_silence_to_audio(audio_path: Path, duration_ms: int = 500) -> None:
-    if duration_ms <= 0:
-        return
-    audio = AudioSegment.from_file(audio_path)
-    padded = AudioSegment.silent(duration=duration_ms) + audio
-    export_format = audio_path.suffix.lstrip(".") or "mp3"
-    padded.export(audio_path, format=export_format)
-
-
 def build_whisper_prompt(script_text: str) -> str:
     cleaned = strip_script_markup(script_text)
     words = cleaned.split()
@@ -1826,7 +1817,6 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
-        prepend_silence_to_audio(raw_narration_file, duration_ms=300)
         if args.dynamic_speed and re.search(r'--([^-][\s\S]*?[^-])--', script):
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
