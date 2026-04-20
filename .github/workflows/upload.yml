@@ -120,7 +120,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$USED_FILE"
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: track used topic"
-            git push
+          if git diff --cached --quiet; then
+            exit 0
           fi
+          git commit -m "chore: track used topic"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git pull --rebase origin main || true
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push rejected, retrying ($attempt/5)..."
+            sleep 5
+          done
+          echo "Failed to push used-topic state after retries."
+          exit 1
