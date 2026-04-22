@@ -753,9 +753,11 @@ def summarize_script_for_image(client: OpenAI | None, script: str) -> str:
 def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
     cleaned = strip_script_markup(script)
     fallback = (
-        "A panicked middle school student staring wide-eyed at a glowing phone screen "
-        "in a dark classroom. The screen clearly displays the bold text \"CAUGHT!\". "
-        "High contrast, cinematic lighting, dramatic shadows. Vertical 9:16 composition."
+        "A hyper-saturated, surreal illustration of a middle school student "
+        "whose eyes are literally popping out of their head in shock. "
+        "Their phone screen is glowing intensely, casting a radioactive green "
+        "light on their face, and clearly displaying the giant, neon-pulsing "
+        "text \"CAUGHT!\". Explosive composition. Vertical 9:16."
     )
     if client is None:
         return fallback
@@ -766,29 +768,34 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "You are an expert thumbnail and hook designer for YouTube Shorts. "
-                        "Analyze the story script and identify a highly dramatic, curiosity-inducing "
-                        "1-to-3 word phrase that summarizes the climax or conflict (e.g., \"SECRET CODE\", "
-                        "\"CAUGHT!\", \"BIG MISTAKE\", \"DO NOT READ\")."
+                        "You are an elite Shorts thumbnail artist. Your goal is maximum "
+                        "visual shock in 0.5 seconds. You create high-energy, over-the-top, "
+                        "vibrant imagery, NOT realistic cinematic shots."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        "Write a vivid image prompt that visualizes the most tense moment from the story. "
-                        "You MUST integrate the short phrase you identified directly into the scene. "
-                        "Specify exactly how the text appears (e.g., written on a chalkboard, "
-                        "glowing on a phone screen, scribbled on a ripped piece of paper, or held on a sign). "
-                        "RULES:\n"
-                        "- Put the exact text you want rendered in double quotes.\n"
-                        "- Describe the subject's expression (e.g., panicked, shocked, sweating).\n"
-                        "- Moody, cinematic lighting.\n"
-                        "- Vertical 9:16 composition.\n\n"
+                        "Analyze this script and identify the single most shocking, "
+                        "embarrassing, or supernatural panic moment. Create a surreal, "
+                        "explosively vibrant visual based on that moment.\n\n"
+                        "MANDATORY RULES:\n"
+                        "1. Identify a 1-to-3 word curiosity-spike phrase (e.g., \"SECRET CODE\", "
+                        "\"BUSTED!\", \"BIG MISTAKE\", \"DO NOT READ\").\n"
+                        "2. This text MUST appear on an object (phone, note, chalkboard).\n"
+                        "3. The text must GLOW with intense, neon energy (like \"radioactive green\", "
+                        "\"electric blue\", or \"hot pink\") and must be clearly readable.\n"
+                        "4. The subject's face must be hyper-exaggerated—eyes literally popping, "
+                        "mouth hanging open, extreme cartoony panic.\n"
+                        "5. Use an \"Explosive Composition\" where elements (books, papers, dust) "
+                        "are flying around the subject.\n"
+                        "6. Specify \"Hyper-saturated colors\" and \"Illustrative, high-energy style\".\n"
+                        "7. Vertical 9:16 composition.\n\n"
                         f"SCRIPT:\n{cleaned}"
                     ),
                 },
             ],
-            temperature=0.7,
+            temperature=0.9,
         )
         prompt = (resp.choices[0].message.content or "").strip().strip('"').strip()
         if not prompt:
@@ -796,50 +803,150 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
         if "9:16" not in prompt:
             prompt = f"{prompt} Vertical 9:16 composition."
         return prompt
-    except Exception:
+    except Exception as exc:
+        print(f"Error engineering vibrant prompt: {exc}")
         return fallback
 
 
-def generate_hook_image_dalle(
-    client: OpenAI | None, script: str, out_dir: Path
-) -> Path | None:
-    if client is None:
-        return None
-    out_dir.mkdir(parents=True, exist_ok=True)
-    prompt = build_dalle_prompt(client, script)
-    print(f"Hook image prompt: {prompt[:200]}")
+def _gemini_client(api_key: str):
     try:
-        response = client.images.generate(
+        from google import genai  # type: ignore[import-not-found]
+    except Exception as exc:
+        raise RuntimeError(
+            "Missing `google-genai`. Install it with `pip install -U google-genai`."
+        ) from exc
+    return genai.Client(api_key=api_key)
+
+
+def _gemini_image_models() -> list[str]:
+    env_model = os.environ.get("GEMINI_IMAGE_MODEL", "").strip()
+    fallbacks = [
+        "gemini-3-flash-image",
+        "gemini-2.5-flash-image-preview",
+        "gemini-2.5-flash-image",
+        "gemini-2.0-flash-preview-image-generation",
+    ]
+    if env_model:
+        return [env_model] + [m for m in fallbacks if m != env_model]
+    return fallbacks
+
+
+def _gemini_extract_inline_image_bytes(response) -> bytes | None:
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return None
+    content = getattr(candidates[0], "content", None)
+    parts = getattr(content, "parts", None) or []
+    for part in parts:
+        inline = getattr(part, "inline_data", None)
+        if inline is None:
+            continue
+        data = getattr(inline, "data", None)
+        if data:
+            return bytes(data)
+    return None
+
+
+def _try_gemini_hook_image(
+    gemini_api_key: str, prompt: str, out_dir: Path
+) -> Path | None:
+    try:
+        client = _gemini_client(gemini_api_key)
+    except Exception as exc:
+        print(f"Gemini client unavailable: {exc}")
+        return None
+    try:
+        from google.genai import types  # type: ignore[import-not-found]
+    except Exception:
+        types = None
+    config = (
+        types.GenerateContentConfig(response_modalities=["IMAGE"])
+        if types is not None
+        else None
+    )
+    last_exc: Exception | None = None
+    for model in _gemini_image_models():
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=config,
+            )
+            data = _gemini_extract_inline_image_bytes(response)
+            if data:
+                out_path = out_dir / f"hook_gemini_{int(time.time())}.png"
+                out_path.write_bytes(data)
+                print(f"Hook image generated with Gemini model: {model}")
+                return out_path
+            print(f"Gemini model {model} returned no inline image data.")
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc)
+            if "404" in msg or "not found" in msg.lower() or "not supported" in msg.lower():
+                print(f"Gemini model {model} unavailable, trying next...")
+                continue
+            print(f"Gemini model {model} failed: {exc}")
+            continue
+    if last_exc is not None:
+        print(f"All Gemini image models failed. Last error: {last_exc}")
+    return None
+
+
+def _try_openai_hook_image(
+    openai_client: OpenAI, prompt: str, out_dir: Path
+) -> Path | None:
+    try:
+        response = openai_client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
             size="1024x1536",
-            quality="low",
+            quality="medium",
             n=1,
         )
-        data = getattr(response, "data", None) or []
-        if not data:
-            print("Image model returned no data.")
-            return None
-        entry = data[0]
-        out_path = out_dir / f"hook_ai_{int(time.time())}.png"
-        b64 = getattr(entry, "b64_json", None)
-        image_url = getattr(entry, "url", None)
-        if b64:
-            import base64
-            out_path.write_bytes(base64.b64decode(b64))
-        elif image_url:
-            image_response = requests.get(image_url, timeout=60)
-            if image_response.status_code != 200:
-                print(f"Image download failed: {image_response.status_code}")
-                return None
-            out_path.write_bytes(image_response.content)
-        else:
-            print("Image model returned neither b64_json nor url.")
-            return None
-        return out_path
     except Exception as exc:
-        print(f"Hook image generation error: {exc}")
+        print(f"OpenAI hook image generation error: {exc}")
         return None
+    data = getattr(response, "data", None) or []
+    if not data:
+        print("OpenAI image model returned no data.")
+        return None
+    entry = data[0]
+    out_path = out_dir / f"hook_openai_{int(time.time())}.png"
+    b64 = getattr(entry, "b64_json", None)
+    image_url = getattr(entry, "url", None)
+    if b64:
+        import base64
+        out_path.write_bytes(base64.b64decode(b64))
+    elif image_url:
+        image_response = requests.get(image_url, timeout=60)
+        if image_response.status_code != 200:
+            print(f"OpenAI image download failed: {image_response.status_code}")
+            return None
+        out_path.write_bytes(image_response.content)
+    else:
+        print("OpenAI image model returned neither b64_json nor url.")
+        return None
+    print("Hook image generated with OpenAI gpt-image-1 (medium).")
+    return out_path
+
+
+def generate_hook_image(
+    openai_client: OpenAI | None,
+    gemini_api_key: str | None,
+    script: str,
+    out_dir: Path,
+) -> Path | None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prompt = build_dalle_prompt(openai_client, script)
+    print(f"Hook image prompt: {prompt[:200]}")
+    if gemini_api_key:
+        result = _try_gemini_hook_image(gemini_api_key, prompt, out_dir)
+        if result is not None:
+            return result
+        print("Falling back to OpenAI gpt-image-1...")
+    if openai_client is not None:
+        return _try_openai_hook_image(openai_client, prompt, out_dir)
+    return None
 
 
 def _unsplash_search(query: str) -> list | None:
@@ -2071,6 +2178,7 @@ def main() -> None:
     api_key = os.environ.get("OPENAI_API_KEY")
     if needs_openai and not api_key:
         raise RuntimeError("Missing OPENAI_API_KEY in environment.")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
 
     project_root = Path.cwd()
     gameplay_dir = project_root / "assets" / "gameplay"
@@ -2099,8 +2207,11 @@ def main() -> None:
                 "No script found for --images-only. Provide --script or ensure output/script.txt exists."
             )
         print("Generating hook image...")
-        hook_image_path = generate_hook_image_dalle(
-            client, script, output_dir / "hook_image"
+        hook_image_path = generate_hook_image(
+            openai_client=client,
+            gemini_api_key=gemini_key,
+            script=script,
+            out_dir=output_dir / "hook_image",
         )
         if hook_image_path is None or not hook_image_path.exists():
             hook_query = summarize_script_for_image(client, script)
@@ -2261,7 +2372,12 @@ def main() -> None:
     if not popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
-    hook_image_path = generate_hook_image_dalle(client, script, output_dir / "hook_image")
+    hook_image_path = generate_hook_image(
+        openai_client=client,
+        gemini_api_key=gemini_key,
+        script=script,
+        out_dir=output_dir / "hook_image",
+    )
     if hook_image_path is None or not hook_image_path.exists():
         hook_query = summarize_script_for_image(client, script)
         print(f"Falling back to Unsplash search: {hook_query!r}")
