@@ -939,7 +939,7 @@ STYLE RULES (match these exactly):
 - Use quoted dialogue to bring scenes to life
 - Build tension and emotion beat by beat
 - End on a high — a moment that makes the viewer feel something
-- TARGET WORD COUNT: 105–125 words
+- TARGET WORD COUNT: 95–115 words
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
 - Research the topic to write authentically and specifically
 
@@ -1543,44 +1543,51 @@ def build_filter_complex(
 
 
 def _two_pass_loudnorm(src: Path, dst: Path) -> bool:
-    target = "I=-16:TP=-1.5:LRA=11"
+    """Peak-normalize each SFX to the same max level, then floor-boost quiet RMS.
+
+    Peak normalization makes every clip reach the same maximum amplitude so no
+    SFX sounds quieter than the others.
+    """
     measure_cmd = (
         f"ffmpeg -hide_banner -nostats -i {shlex.quote(str(src))} "
-        f"-af loudnorm={target}:print_format=json -f null -"
+        f"-af volumedetect -f null -"
     )
     try:
         result = subprocess.run(
             measure_cmd, shell=True, capture_output=True, text=True, check=False
         )
     except Exception as exc:
-        print(f"Loudnorm measure failed for {src.name}: {exc}")
+        print(f"Peak measure failed for {src.name}: {exc}")
         return False
     stderr = result.stderr or ""
-    json_match = re.search(r"\{[\s\S]*?\}", stderr)
-    if not json_match:
-        print(f"Could not parse loudnorm output for {src.name}")
+    peak_match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", stderr)
+    mean_match = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", stderr)
+    if not peak_match:
+        print(f"Could not parse peak for {src.name}")
         return False
-    try:
-        stats = json.loads(json_match.group(0))
-    except json.JSONDecodeError:
-        return False
-    measured = (
-        f"measured_I={stats.get('input_i')}:"
-        f"measured_LRA={stats.get('input_lra')}:"
-        f"measured_TP={stats.get('input_tp')}:"
-        f"measured_thresh={stats.get('input_thresh')}:"
-        f"offset={stats.get('target_offset')}"
-    )
-    apply_filter = f"loudnorm={target}:{measured}:linear=true:print_format=summary"
+
+    peak_db = float(peak_match.group(1))
+    mean_db = float(mean_match.group(1)) if mean_match else -25.0
+    # Bring peak to roughly -1 dBFS so every clip has identical headroom.
+    peak_boost_db = max(0.0, -1.0 - peak_db)
+    # If the clip is quiet on average even after peak boost, push it up more
+    # but hard-limit it so it never clips.
+    target_rms_db = -14.0
+    projected_rms = mean_db + peak_boost_db
+    extra_rms_boost = max(0.0, target_rms_db - projected_rms)
+    extra_rms_boost = min(extra_rms_boost, 8.0)
+    total_boost_db = peak_boost_db + extra_rms_boost
+
+    filter_chain = f"volume={total_boost_db:.2f}dB,alimiter=limit=0.97:level=false"
     apply_cmd = (
         f"ffmpeg -y -hide_banner -i {shlex.quote(str(src))} "
-        f"-af {shlex.quote(apply_filter)} -ar 48000 -c:a libmp3lame -q:a 2 "
+        f"-af {shlex.quote(filter_chain)} -ar 48000 -c:a libmp3lame -q:a 2 "
         f"{shlex.quote(str(dst))}"
     )
     try:
         subprocess.run(apply_cmd, shell=True, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as exc:
-        print(f"Loudnorm apply failed for {src.name}: {exc.stderr[:200] if exc.stderr else exc}")
+        print(f"Normalize apply failed for {src.name}: {exc.stderr[:200] if exc.stderr else exc}")
         return False
     return True
 
