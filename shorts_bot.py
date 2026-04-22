@@ -753,9 +753,9 @@ def summarize_script_for_image(client: OpenAI | None, script: str) -> str:
 def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
     cleaned = strip_script_markup(script)
     fallback = (
-        f"A hyper-realistic, dramatic cinematic photo that visually summarizes this short "
-        f"story: {cleaned[:300]}. Vertical composition, no text, no captions, "
-        f"no logos, no watermark."
+        "A panicked middle school student staring wide-eyed at a glowing phone screen "
+        "in a dark classroom. The screen clearly displays the bold text \"CAUGHT!\". "
+        "High contrast, cinematic lighting, dramatic shadows. Vertical 9:16 composition."
     )
     if client is None:
         return fallback
@@ -764,25 +764,37 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
             model="gpt-4o-mini",
             messages=[
                 {
+                    "role": "system",
+                    "content": (
+                        "You are an expert thumbnail and hook designer for YouTube Shorts. "
+                        "Analyze the story script and identify a highly dramatic, curiosity-inducing "
+                        "1-to-3 word phrase that summarizes the climax or conflict (e.g., \"SECRET CODE\", "
+                        "\"CAUGHT!\", \"BIG MISTAKE\", \"DO NOT READ\")."
+                    ),
+                },
+                {
                     "role": "user",
                     "content": (
-                        "Write a single vivid DALL-E 3 image prompt that visually SUMMARIZES "
-                        "the whole short video below. "
-                        "Focus on one strong iconic scene that captures the main moment or punchline. "
-                        "Style: hyper-realistic cinematic photo, dramatic lighting, strong focal subject. "
-                        "Rules: no text, no captions, no logos, no watermark, no famous people. "
-                        "1-2 sentences, vivid nouns and adjectives only.\n\n"
+                        "Write a vivid image prompt that visualizes the most tense moment from the story. "
+                        "You MUST integrate the short phrase you identified directly into the scene. "
+                        "Specify exactly how the text appears (e.g., written on a chalkboard, "
+                        "glowing on a phone screen, scribbled on a ripped piece of paper, or held on a sign). "
+                        "RULES:\n"
+                        "- Put the exact text you want rendered in double quotes.\n"
+                        "- Describe the subject's expression (e.g., panicked, shocked, sweating).\n"
+                        "- Moody, cinematic lighting.\n"
+                        "- Vertical 9:16 composition.\n\n"
                         f"SCRIPT:\n{cleaned}"
                     ),
-                }
+                },
             ],
             temperature=0.7,
         )
         prompt = (resp.choices[0].message.content or "").strip().strip('"').strip()
         if not prompt:
             return fallback
-        if "no text" not in prompt.lower():
-            prompt = f"{prompt} No text. No captions. No logos."
+        if "9:16" not in prompt:
+            prompt = f"{prompt} Vertical 9:16 composition."
         return prompt
     except Exception:
         return fallback
@@ -800,7 +812,7 @@ def generate_hook_image_dalle(
         response = client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
-            size="1024x1024",
+            size="1024x1536",
             quality="low",
             n=1,
         )
@@ -1971,6 +1983,16 @@ def main() -> None:
         help="Generate popup images using OpenAI image model",
     )
     parser.add_argument(
+        "--images-only",
+        action="store_true",
+        help="Only generate hook + popup images, then exit (no TTS/subtitles/video).",
+    )
+    parser.add_argument(
+        "--script",
+        default="",
+        help="Optional script text to use for --images-only (otherwise uses output/script.txt).",
+    )
+    parser.add_argument(
         "--duration-seconds",
         type=float,
         default=None,
@@ -2033,6 +2055,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.images_only and not args.generate_images:
+        args.generate_images = True
+
     if args.quick_test:
         args.words = 15
         args.duration_seconds = 3.0
@@ -2061,14 +2086,37 @@ def main() -> None:
     if args.upload:
         get_youtube_credentials()
 
-    gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
     client = OpenAI(api_key=api_key) if api_key else None
+
+    script_file = output_dir / "script.txt"
+    if args.images_only:
+        script = (args.script or "").strip()
+        if not script:
+            if script_file.exists():
+                script = script_file.read_text(encoding="utf-8").strip()
+        if not script:
+            raise RuntimeError(
+                "No script found for --images-only. Provide --script or ensure output/script.txt exists."
+            )
+        print("Generating hook image...")
+        hook_image_path = generate_hook_image_dalle(
+            client, script, output_dir / "hook_image"
+        )
+        if hook_image_path is None or not hook_image_path.exists():
+            hook_query = summarize_script_for_image(client, script)
+            print(f"Falling back to Unsplash search: {hook_query!r}")
+            hook_image_path = fetch_unsplash_hook_image(hook_query, output_dir / "hook_image")
+        if hook_image_path is not None and hook_image_path.exists():
+            print(f"Hook image saved: {hook_image_path}")
+        print("Done (images-only).")
+        return
+
+    gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
 
     total_steps = 6 + (1 if args.upload else 0)
     step = 1
     start_ts = time.time()
 
-    script_file = output_dir / "script.txt"
     if args.video_only:
         print_progress(step, total_steps, "Reusing existing script")
         if script_file.exists():

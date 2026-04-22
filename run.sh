@@ -4,19 +4,29 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+is_images_only=0
+for arg in "$@"; do
+  if [[ "$arg" == "--images-only" ]]; then
+    is_images_only=1
+    break
+  fi
+done
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 not found. Install Python 3.10+ first."
   exit 1
 fi
 
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  echo "ffmpeg not found. Install ffmpeg first."
-  exit 1
-fi
+if [[ $is_images_only -eq 0 ]]; then
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ffmpeg not found. Install ffmpeg first."
+    exit 1
+  fi
 
-if ! command -v ffprobe >/dev/null 2>&1; then
-  echo "ffprobe not found. Install ffmpeg tools first."
-  exit 1
+  if ! command -v ffprobe >/dev/null 2>&1; then
+    echo "ffprobe not found. Install ffmpeg tools first."
+    exit 1
+  fi
 fi
 
 if [[ ! -f ".env" ]]; then
@@ -31,12 +41,14 @@ fi
 
 mkdir -p assets/gameplay assets/popups assets/story_images output
 
-shopt -s nullglob
-gameplay_files=(assets/gameplay/*.mp4 assets/gameplay/*.mov assets/gameplay/*.mkv assets/gameplay/*.webm)
-shopt -u nullglob
-if [[ ${#gameplay_files[@]} -eq 0 ]]; then
-  echo "No gameplay video found in assets/gameplay."
-  exit 1
+if [[ $is_images_only -eq 0 ]]; then
+  shopt -s nullglob
+  gameplay_files=(assets/gameplay/*.mp4 assets/gameplay/*.mov assets/gameplay/*.mkv assets/gameplay/*.webm)
+  shopt -u nullglob
+  if [[ ${#gameplay_files[@]} -eq 0 ]]; then
+    echo "No gameplay video found in assets/gameplay."
+    exit 1
+  fi
 fi
 
 if [[ ! -d ".venv" ]]; then
@@ -49,6 +61,11 @@ if [[ "${CI:-}" == "true" ]]; then
 else
   python -m pip install --upgrade pip >/dev/null 2>&1
   python -m pip install -r requirements.txt >/dev/null 2>&1
+fi
+
+if [[ $is_images_only -eq 1 ]]; then
+  python shorts_bot.py "$@"
+  exit $?
 fi
 
 WORDS="${WORDS:-100}"
