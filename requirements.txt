@@ -2,6 +2,7 @@ openai
 python-dotenv
 google-genai
 google-api-python-client
+flask
 google-auth
 google-auth-oauthlib
 requests

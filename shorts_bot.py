@@ -84,10 +84,6 @@ def get_dynamic_speed_factor(
             u = 1.0 - ((start_ms - t_ms) / ramp_ms)
             f = fast_factor + (slow_factor - fast_factor) * _smoothstep(u)
             best = min(best, f)
-        elif end_ms < t_ms <= end_ms + ramp_ms:
-            u = (t_ms - end_ms) / ramp_ms
-            f = slow_factor + (fast_factor - slow_factor) * _smoothstep(u)
-            best = min(best, f)
     return best
 
 
@@ -205,6 +201,64 @@ def run(command: str) -> str:
     return result.stdout.strip()
 
 
+def run_ffmpeg_with_progress(command: str, total_duration: float | None = None) -> None:
+    """Run ffmpeg streaming `-progress` output so the UI can show sub-progress."""
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+
+    pending: dict[str, str] = {}
+    last_print = 0.0
+    tail_errors: list[str] = []
+    for line in iter(proc.stdout.readline, ""):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if "=" in line and not line.startswith("["):
+            key, _, value = line.partition("=")
+            pending[key.strip()] = value.strip()
+            if key.strip() == "progress":
+                out_time_us = pending.get("out_time_us") or pending.get("out_time_ms") or "0"
+                try:
+                    out_sec = int(out_time_us) / 1_000_000.0
+                except ValueError:
+                    out_sec = 0.0
+                fps = pending.get("fps", "0")
+                speed = pending.get("speed", "0x")
+                frame = pending.get("frame", "0")
+                pct = ""
+                if total_duration and total_duration > 0:
+                    pct = f" pct={min(100.0, out_sec / total_duration * 100.0):.1f}"
+                now = time.time()
+                # rate-limit to ~2 lines/sec so the log doesn't explode
+                if now - last_print >= 0.5 or pending.get("progress") == "end":
+                    last_print = now
+                    print(
+                        f"[render] frame={frame} fps={fps} speed={speed} "
+                        f"time={out_sec:.2f}s{pct}",
+                        flush=True,
+                    )
+                pending.clear()
+        else:
+            # anything from ffmpeg stderr (warnings, errors)
+            tail_errors.append(line)
+            if len(tail_errors) > 60:
+                tail_errors.pop(0)
+
+    proc.wait()
+    if proc.returncode != 0:
+        tail = "\n".join(tail_errors[-40:])
+        raise RuntimeError(
+            f"ffmpeg failed ({proc.returncode}): {command}\n{tail}"
+        )
+
+
 def transcribe_words(
     audio_path: Path,
     model_name: str = "medium",
@@ -319,18 +373,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             _maybe_upper(_sanitize_ass_text(word.text.strip()), uppercase_ratio)
             for word in chunk
         ]
-        for current_idx, word in enumerate(chunk):
-            start = _ass_ts(word.start)
-            end = _ass_ts(max(word.end, word.start + 0.05))
-            parts: List[str] = []
-            for token_idx, token in enumerate(chunk_tokens):
-                if token_idx == current_idx:
-                    parts.append(r"{\1c&H00FFFF&}" + token + r"{\1c&HFFFFFF&}")
-                else:
-                    parts.append(token)
-            lines.append(
-                f"Dialogue: 0,{start},{end},Default,,0,0,0,,{override}{' '.join(parts)}\n"
-            )
+        start = _ass_ts(chunk[0].start)
+        end = _ass_ts(max(chunk[-1].end, chunk[-1].start + 0.05))
+        lines.append(
+            f"Dialogue: 0,{start},{end},Default,,0,0,0,,{override}{' '.join(chunk_tokens)}\n"
+        )
 
         idx += words_per_block
 
@@ -752,6 +799,8 @@ def summarize_script_for_image(client: OpenAI | None, script: str) -> str:
 
 def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
     cleaned = strip_script_markup(script)
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
+    first_sentence = sentences[0] if sentences else cleaned[:200]
     fallback = (
         "A hyper-saturated, surreal illustration of a middle school student "
         "whose eyes are literally popping out of their head in shock. "
@@ -776,22 +825,28 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
                 {
                     "role": "user",
                     "content": (
-                        "Analyze this script and identify the single most shocking, "
-                        "embarrassing, or supernatural panic moment. Create a surreal, "
-                        "explosively vibrant visual based on that moment.\n\n"
+                        "Create a surreal, explosively vibrant visual that DIRECTLY depicts "
+                        "the literal subject, setting, and action of the FIRST SENTENCE below. "
+                        "The image must visually match that exact moment so a viewer instantly "
+                        "understands what the video is about in under a second. Use the rest of "
+                        "the script only as secondary context.\n\n"
                         "MANDATORY RULES:\n"
-                        "1. Identify a 1-to-3 word curiosity-spike phrase (e.g., \"SECRET CODE\", "
-                        "\"BUSTED!\", \"BIG MISTAKE\", \"DO NOT READ\").\n"
-                        "2. This text MUST appear on an object (phone, note, chalkboard).\n"
-                        "3. The text must GLOW with intense, neon energy (like \"radioactive green\", "
+                        "1. The scene MUST depict the people, objects, and setting stated in the "
+                        "first sentence (not a generic school scene, unless the hook is about school).\n"
+                        "2. Pick a 1-to-3 word curiosity-spike phrase drawn from the first sentence "
+                        "(e.g., \"SECRET CODE\", \"BUSTED!\", \"BIG MISTAKE\", \"DO NOT READ\").\n"
+                        "3. This text MUST appear on an object that fits the first sentence "
+                        "(phone, note, chalkboard, sign, jersey, screen, etc.).\n"
+                        "4. The text must GLOW with intense, neon energy (like \"radioactive green\", "
                         "\"electric blue\", or \"hot pink\") and must be clearly readable.\n"
-                        "4. The subject's face must be hyper-exaggerated—eyes literally popping, "
+                        "5. The subject's face must be hyper-exaggerated—eyes literally popping, "
                         "mouth hanging open, extreme cartoony panic.\n"
-                        "5. Use an \"Explosive Composition\" where elements (books, papers, dust) "
-                        "are flying around the subject.\n"
-                        "6. Specify \"Hyper-saturated colors\" and \"Illustrative, high-energy style\".\n"
-                        "7. Vertical 9:16 composition.\n\n"
-                        f"SCRIPT:\n{cleaned}"
+                        "6. Use an \"Explosive Composition\" where fitting elements are flying "
+                        "around the subject.\n"
+                        "7. Specify \"Hyper-saturated colors\" and \"Illustrative, high-energy style\".\n"
+                        "8. Vertical 9:16 composition.\n\n"
+                        f"FIRST SENTENCE (primary focus):\n{first_sentence}\n\n"
+                        f"FULL SCRIPT (context only):\n{cleaned}"
                     ),
                 },
             ],
@@ -1521,7 +1576,7 @@ def choose_story_related_popups(
 
 
 def build_emoji_overlays(subtitle_segments: List[dict], emoji_dir: Path) -> List[PopupImage]:
-    overlays = []
+    overlays: List[PopupImage] = []
     used_emojis: set[str] = set()
     last_emoji: str | None = None
     font_size = 100
@@ -1529,50 +1584,69 @@ def build_emoji_overlays(subtitle_segments: List[dict], emoji_dir: Path) -> List
     top_margin = 520
     caption_center_x = 540
     emoji_size = 105
-    padding = 25
-    screen_padding = 56
-    safety_padding = 90
-    # Match ASS caption chunking exactly so emoji placement stays aligned.
-    for chunk in split_caption_chunks(subtitle_segments, words_per_chunk=1):
-        emoji = pick_non_repeating_emoji(str(chunk["raw_text"]), used_emojis, last_emoji)
-        used_emojis.add(emoji)
-        last_emoji = emoji
-        img_path = download_twemoji_png(emoji, emoji_dir)
+    emoji_gap = 18
+
+    # Cap the number of emoji beats to keep the ffmpeg filter graph cheap.
+    # Each emoji beat = 2 overlay inputs, so max_beats=4 → 8 overlays.
+    max_beats = 4
+
+    # Group words into the same 3-word blocks the captions use.
+    words_per_block = 3
+    blocks = split_caption_chunks(subtitle_segments, words_per_chunk=words_per_block)
+    blocks = [b for b in blocks if str(b.get("raw_text", "")).strip()]
+    if not blocks:
+        return overlays
+
+    # Sample up to `max_beats` blocks evenly across the video so the emoji
+    # energy is spread out without overwhelming the encoder.
+    if len(blocks) > max_beats:
+        step = len(blocks) / max_beats
+        selected = [blocks[int(i * step)] for i in range(max_beats)]
+    else:
+        selected = blocks
+
+    for block in selected:
+        block_text = str(block.get("raw_text", "")).strip()
+
+        primary = pick_non_repeating_emoji(block_text, used_emojis, last_emoji)
+        used_emojis.add(primary)
+        secondary = pick_non_repeating_emoji(block_text, used_emojis, primary)
+        used_emojis.add(secondary)
+        last_emoji = secondary
+
         display_text = format_caption_multiline(
-            random_caps_text(str(chunk.get("raw_text", "")).strip()),
+            random_caps_text(block_text),
             max_words_per_line=1,
             max_chars_per_line=16,
-            max_lines=2,
+            max_lines=3,
         )
-        display_lines = [ln for ln in display_text.split("\n") if ln.strip()]
-        line_count = max(1, len(display_lines))
-        last_line_text = display_lines[-1] if display_lines else str(chunk.get("raw_text", "")).strip()
-        last_line_w = estimate_line_width_px(last_line_text, font_size=font_size)
-        line_left_x = int(caption_center_x - (last_line_w / 2.0))
-        # Rely on explicit padding instead of pulling into the final word.
-        right_edge = line_left_x + last_line_w
-        trailing_char = last_line_text[-1] if last_line_text else ""
-        punct_extra = int(font_size * 0.12) if trailing_char in ".!?,;:" else 0
-        x_inline = right_edge + padding + punct_extra
-        max_x = 1080 - emoji_size - screen_padding
-        overflow = x_inline > (max_x - safety_padding)
-        # Keep emoji on line 2 when caption has exactly two lines.
-        force_under = line_count >= 3
+        line_count = max(1, len([ln for ln in display_text.split("\n") if ln.strip()]))
 
-        if overflow or force_under:
-            # If inline placement exceeds bounds, move emoji to a new line.
-            x_pos = caption_center_x - (emoji_size // 2)
-            y_pos = top_margin + (line_count * line_step) + 6
-        else:
-            x_pos = max(screen_padding, x_inline)
-            # Align with the current last subtitle line.
-            y_pos = top_margin + ((line_count - 1) * line_step) - 2
+        total_w = emoji_size * 2 + emoji_gap
+        x_left = caption_center_x - (total_w // 2)
+        y_pos = top_margin + (line_count * line_step) + 12
+
+        start_sec = float(block["start"])
+        end_sec = float(block["end"])
+
         overlays.append(
             PopupImage(
-                path=img_path,
-                start_sec=float(chunk["start"]),
-                end_sec=float(chunk["end"]),
-                x=x_pos,
+                path=download_twemoji_png(primary, emoji_dir),
+                start_sec=start_sec,
+                end_sec=end_sec,
+                x=x_left,
+                y=y_pos,
+                width=emoji_size,
+                use_fade=False,
+                is_emoji=True,
+            )
+        )
+        overlays.append(
+            PopupImage(
+                path=download_twemoji_png(secondary, emoji_dir),
+                start_sec=start_sec,
+                end_sec=end_sec,
+                x=x_left + emoji_size + emoji_gap,
                 y=y_pos,
                 width=emoji_size,
                 use_fade=False,
@@ -1731,16 +1805,22 @@ def ensure_normalized_sounds(src_dir: Path, dst_dir: Path) -> Path:
 def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
     if not sounds_dir.exists():
         return
+    blocked_keywords = {"fahhh"}
     all_sounds = sorted(
         p for p in sounds_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"}
+        if p.is_file()
+        and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"}
+        and not any(kw in p.name.lower() for kw in blocked_keywords)
     )
     if not all_sounds:
         return
+    last_sfx: Path | None = None
     for popup in popups:
         if not popup.play_sfx:
             continue
-        popup.sfx_path = random.choice(all_sounds)
+        choices = [s for s in all_sounds if s != last_sfx] or all_sounds
+        popup.sfx_path = random.choice(choices)
+        last_sfx = popup.sfx_path
 
 
 def build_popup_sfx_audio_chain(
@@ -1877,8 +1957,17 @@ def compose_video(
         filter_complex = f"{filter_complex};{bgm_chain}"
         audio_map = "-map [aoutmix] "
 
+    # Keep the filter graph single-threaded; with this many overlays ffmpeg
+    # otherwise exhausts pthreads on macOS and the whole render aborts with
+    # "Failed initializing scaling graph (Resource temporarily unavailable)".
+    thread_flags = "-filter_threads 1 -filter_complex_threads 1 -threads 2 "
+    # `-progress pipe:1 -nostats` streams structured key=value lines to stdout
+    # so the UI can show sub-progress during the heavy render step.
+    progress_flags = "-progress pipe:1 -nostats "
     cmd = (
         "ffmpeg -y "
+        + thread_flags
+        + progress_flags
         + " ".join(input_parts)
         + " "
         + f"-filter_complex {shlex.quote(filter_complex)} "
@@ -1894,6 +1983,8 @@ def compose_video(
     if not burn_subtitles and srt_path.exists():
         cmd = (
             "ffmpeg -y "
+            + thread_flags
+            + progress_flags
             + " ".join(input_parts)
             + " "
             + f"-filter_complex {shlex.quote(filter_complex)} "
@@ -1908,7 +1999,9 @@ def compose_video(
             + "-shortest "
             + shlex.quote(str(out_video_path))
         )
-    run(cmd)
+    print(f"[step] begin render duration={total_duration:.2f}s", flush=True)
+    run_ffmpeg_with_progress(cmd, total_duration=total_duration)
+    print("[step] end render", flush=True)
     return start_time
 
 
@@ -1952,7 +2045,14 @@ def get_youtube_credentials():
     return creds
 
 
-def upload_to_youtube(video_file: Path, title: str, description: str, tags: List[str], privacy: str) -> str:
+def upload_to_youtube(
+    video_file: Path,
+    title: str,
+    description: str,
+    tags: List[str],
+    privacy: str,
+    thumbnail_file: Path | None = None,
+) -> str:
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
     from googleapiclient.http import MediaFileUpload
@@ -1974,6 +2074,17 @@ def upload_to_youtube(video_file: Path, title: str, description: str, tags: List
     response = request.execute()
 
     video_id = response["id"]
+
+    if thumbnail_file is not None and thumbnail_file.exists():
+        try:
+            mime = "image/png" if thumbnail_file.suffix.lower() == ".png" else "image/jpeg"
+            thumb_media = MediaFileUpload(str(thumbnail_file), mimetype=mime, resumable=False)
+            youtube.thumbnails().set(videoId=video_id, media_body=thumb_media).execute()
+            print(f"Custom thumbnail set from {thumbnail_file.name}")
+        except HttpError as exc:
+            print(f"Custom thumbnail upload skipped: {exc}")
+        except Exception as exc:
+            print(f"Custom thumbnail upload error: {exc}")
     deadline = time.time() + 300
     while time.time() < deadline:
         try:
@@ -2246,8 +2357,16 @@ def main() -> None:
             print("\n--- Generated Script ---")
             print(clean_script)
             print("------------------------")
-            if sys.stdin.isatty():
-                yn = input("Use this script? (Y/N) ").strip().upper()
+            interactive = (
+                sys.stdin.isatty()
+                or os.environ.get("SHORTS_BOT_INTERACTIVE") == "1"
+            )
+            if interactive:
+                print("Use this script? (Y/N) ", flush=True)
+                try:
+                    yn = input().strip().upper()
+                except EOFError:
+                    yn = "Y"
                 if yn in ("Y", "YES", ""):
                     break
                 print("Regenerating...\n")
@@ -2493,6 +2612,7 @@ def main() -> None:
             description=description,
             tags=tags,
             privacy=args.privacy,
+            thumbnail_file=hook_image_path if hook_image_path and hook_image_path.exists() else None,
         )
         print(f"Uploaded: {video_url}")
         print("Note: Shorts can take 1–5 min to process before appearing in the feed.")
