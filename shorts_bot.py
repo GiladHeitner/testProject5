@@ -1999,8 +1999,8 @@ def compose_video(
             + "-shortest "
             + shlex.quote(str(out_video_path))
         )
-    print(f"[step] begin render duration={total_duration:.2f}s", flush=True)
-    run_ffmpeg_with_progress(cmd, total_duration=total_duration)
+    print(f"[step] begin render duration={target_duration:.2f}s", flush=True)
+    run_ffmpeg_with_progress(cmd, total_duration=target_duration)
     print("[step] end render", flush=True)
     return start_time
 
