@@ -14,6 +14,7 @@ import requests
 from openai import OpenAI
 
 from .emoji import download_twemoji_png, pick_non_repeating_emoji
+from .image_judge import judge_image
 from .script_ai import build_dalle_prompt
 from .subtitles import split_caption_chunks
 from .text import format_caption_multiline, random_caps_text, text_keywords
@@ -162,14 +163,44 @@ def generate_hook_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt = build_dalle_prompt(openai_client, script)
     print(f"Hook image prompt: {prompt[:200]}")
+    expected = "A sharp, visually compelling vertical hook image that matches the first sentence/topic. No watermark, no logos, no random text."
+
+    result: Path | None = None
     if gemini_api_key:
         result = _try_gemini_hook_image(gemini_api_key, prompt, out_dir)
         if result is not None:
-            return result
+            verdict = judge_image(client=openai_client, image_path=result, expected=expected)
+            if verdict.ok:
+                return result
+            print(f"Hook image rejected by judge (score={verdict.score}): {verdict.reason}")
+            # Try one more Gemini regeneration (often fixes weird outputs).
+            regen = _try_gemini_hook_image(gemini_api_key, prompt + " Ultra sharp, no text, no watermark.", out_dir)
+            if regen is not None:
+                verdict2 = judge_image(client=openai_client, image_path=regen, expected=expected)
+                if verdict2.ok:
+                    return regen
+                print(f"Regenerated Gemini hook rejected (score={verdict2.score}): {verdict2.reason}")
         print("Falling back to OpenAI gpt-image-1...")
+
     if openai_client is not None:
-        return _try_openai_hook_image(openai_client, prompt, out_dir)
-    return None
+        result = _try_openai_hook_image(openai_client, prompt, out_dir)
+        if result is None:
+            return None
+        verdict = judge_image(client=openai_client, image_path=result, expected=expected)
+        if verdict.ok:
+            return result
+        print(f"OpenAI hook image rejected by judge (score={verdict.score}): {verdict.reason}")
+        # User preference: if it's not good enough, try Gemini.
+        if gemini_api_key:
+            regen = _try_gemini_hook_image(gemini_api_key, prompt + " Ultra sharp, no text, no watermark.", out_dir)
+            if regen is not None:
+                verdict2 = judge_image(client=openai_client, image_path=regen, expected=expected)
+                if verdict2.ok:
+                    return regen
+                print(f"Gemini replacement hook rejected (score={verdict2.score}): {verdict2.reason}")
+        return result
+
+    return result
 
 
 # ---------------------------------------------------------------------------

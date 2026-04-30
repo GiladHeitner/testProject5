@@ -15,7 +15,7 @@ from .types import PopupImage
 def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
     if not sounds_dir.exists():
         return
-    blocked_keywords = {"fahhh"}
+    blocked_keywords = {"fahhh", "taco", "bell"}
     all_sounds = sorted(
         p for p in sounds_dir.iterdir()
         if p.is_file()
@@ -53,9 +53,14 @@ def build_popup_sfx_audio_chain(
         trim_s = max(0.15, float(sfx_trim_seconds))
         speed = min(2.0, max(0.5, float(sfx_speed)))
         vol = max(0.0, float(sfx_volume))
+        # Some SFX files (notably mouse clicks) include leading silence which
+        # makes them sound "late" vs the visual beat. Strip that before delay.
+        pre = ""
+        if popup.sfx_path is not None and "mouse-click" in popup.sfx_path.name.lower():
+            pre = "silenceremove=start_periods=1:start_duration=0.005:start_threshold=-50dB,"
         chains.append(
             f"[{sfx_idx}:a]"
-            f"atrim=0:{trim_s:.2f},asetpts=N/SR/TB,"
+            f"{pre}atrim=0:{trim_s:.2f},asetpts=N/SR/TB,"
             f"atempo={speed:.2f},volume={vol:.2f},"
             f"adelay={delay_ms}|{delay_ms}"
             f"[boom{i}]"
@@ -73,6 +78,9 @@ def build_filter_complex(
     total_duration: float,
     popups: List[PopupImage],
     burn_subtitles: bool,
+    hook_video_input_index: int | None = None,
+    hook_video_duration: float = 1.5,
+    hook_text: str | None = None,
     source_top_crop: int = 96,
 ) -> str:
     chains = []
@@ -89,6 +97,47 @@ def build_filter_complex(
         "fps=60"
         "[v0]"
     )
+
+    # Optional hook intro clip overlay (short video) at the beginning.
+    # This is intentionally a small square (PiP), not full-screen.
+    if hook_video_input_index is not None:
+        dur = max(0.4, float(hook_video_duration))
+        chains.append(
+            f"[{hook_video_input_index}:v]"
+            f"trim=duration={dur:.3f},setpts=PTS-STARTPTS,"
+            "scale=700:700:force_original_aspect_ratio=increase,"
+            "crop=700:700,"
+            "fps=60"
+            "[vh]"
+        )
+        if hook_text:
+            safe_txt = (
+                str(hook_text)
+                .replace("\\", "\\\\")
+                .replace(":", "\\:")
+                .replace("'", "\\'")
+            )
+            chains.append(
+                "[vh]"
+                "drawbox=x=0:y=0:w=700:h=150:color=black@0.55:t=fill,"
+                f"drawtext=text='{safe_txt}':"
+                "fontcolor=white:fontsize=58:borderw=6:bordercolor=black:"
+                "x=(w-text_w)/2:y=42"
+                "[vht]"
+            )
+            hook_src = "vht"
+        else:
+            hook_src = "vh"
+        hook_x = (1080 - 700) // 2
+        hook_y = 860
+        chains.append(
+            f"[v0][{hook_src}]overlay="
+            f"x={hook_x}:y={hook_y}:enable='between(t,0,{dur:.3f})'"
+            "[v0h]"
+        )
+        base_video = "v0h"
+    else:
+        base_video = "v0"
 
     for i, popup in enumerate(popups, start=0):
         popup_len = max(0.2, popup.end_sec - popup.start_sec)
@@ -121,7 +170,7 @@ def build_filter_complex(
             )
         )
 
-    current = "v0"
+    current = base_video
     for i, popup in enumerate(popups, start=0):
         next_label = f"v{i + 1}"
         chains.append(
@@ -152,6 +201,9 @@ def compose_video(
     srt_path: Path,
     popup_images: List[PopupImage],
     out_video_path: Path,
+    hook_video_path: Path | None = None,
+    hook_video_duration: float = 1.5,
+    hook_text: str | None = None,
     duration_seconds: float | None = None,
     burn_subtitles: bool = True,
     popup_sfx_path: Path | None = None,
@@ -173,19 +225,26 @@ def compose_video(
     else:
         start_time = random.uniform(0.0, gameplay_duration - required_source_duration - 0.3)
 
+    input_parts = [
+        f"-i {shlex.quote(str(gameplay_path))}",
+        f"-i {shlex.quote(str(narration_path))}",
+    ]
+    hook_video_input_index: int | None = None
+    if hook_video_path is not None and hook_video_path.exists():
+        input_parts.append(f"-i {shlex.quote(str(hook_video_path))}")
+        hook_video_input_index = len(input_parts) - 1
+
     filter_complex = build_filter_complex(
         subtitle_path=srt_path,
         start_time=start_time,
         total_duration=target_duration,
         popups=popup_images,
         burn_subtitles=burn_subtitles,
+        hook_video_input_index=hook_video_input_index,
+        hook_video_duration=hook_video_duration,
+        hook_text=hook_text,
         source_top_crop=source_top_crop,
     )
-
-    input_parts = [
-        f"-i {shlex.quote(str(gameplay_path))}",
-        f"-i {shlex.quote(str(narration_path))}",
-    ]
     for popup in popup_images:
         if popup.path.suffix.lower() == ".gif":
             input_parts.append(

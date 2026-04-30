@@ -37,6 +37,8 @@ def write_karaoke_block_ass(
     x = play_res_x // 2
     words_per_block = max(2, int(words_per_block))
 
+    # Classic \\k karaoke keeps earlier words highlighted; we draw full caption on a base
+    # layer (all white) and per-word overlay lines (same text, only active word yellow).
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {play_res_x}
@@ -51,11 +53,9 @@ Style: Default,{font},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    override = (
-        rf"{{\an8\pos({x},{y})"
-        r"\bord7\shad0\3c&H000000&\4c&H000000&"
-        r"\1c&HFFFFFF&}"
-    )
+    override = rf"{{\an8\pos({x},{y})\bord7\shad0\3c&H000000&\4c&H000000&}}"
+    yellow = "&H0000FFFF&"
+    white = "&H00FFFFFF&"
 
     lines: List[str] = [header]
     idx = 0
@@ -68,11 +68,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             maybe_upper(sanitize_ass_text(word.text.strip()), uppercase_ratio)
             for word in chunk
         ]
-        start = ass_ts(chunk[0].start)
-        end = ass_ts(max(chunk[-1].end, chunk[-1].start + 0.05))
-        lines.append(
-            f"Dialogue: 0,{start},{end},Default,,0,0,0,,{override}{' '.join(chunk_tokens)}\n"
+        line_start_s = float(chunk[0].start)
+        line_end_s = float(max(chunk[-1].end, chunk[-1].start + 0.05))
+        start = ass_ts(line_start_s)
+        end = ass_ts(line_end_s)
+
+        # Layer 0: full line white for the whole chunk duration.
+        plain_text = " ".join(
+            rf"{{\1c{white}}}{escape_ass_text(t)}" for t in chunk_tokens
         )
+        lines.append(
+            f"Dialogue: 0,{start},{end},Default,,0,0,0,,{override}{plain_text}\n"
+        )
+
+        # Layer 1: during each word's window, redraw full line with only that word yellow.
+        for wi, w in enumerate(chunk):
+            ws = float(w.start)
+            we = float(max(w.end, w.start + 0.05))
+            colored = []
+            for wj, tok in enumerate(chunk_tokens):
+                et = escape_ass_text(tok)
+                col = yellow if wj == wi else white
+                colored.append(rf"{{\1c{col}}}{et}")
+            line_colored = " ".join(colored)
+            lines.append(
+                f"Dialogue: 1,{ass_ts(ws)},{ass_ts(we)},Default,,0,0,0,,{override}{line_colored}\n"
+            )
 
         idx += words_per_block
 

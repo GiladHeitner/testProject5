@@ -38,6 +38,7 @@ from shorts_bot_lib.runner import (
     pick_random_file,
     print_progress,
 )
+from shorts_bot_lib.scene_assets import build_scene_popups
 from shorts_bot_lib.script_ai import (
     generate_metadata,
     generate_script,
@@ -55,6 +56,7 @@ from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
     generate_voiceover_openai_tts,
 )
+from shorts_bot_lib.hook_video import fetch_best_hook_video
 from shorts_bot_lib.youtube_api import (
     get_youtube_credentials,
     post_pinned_comment,
@@ -135,6 +137,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--quick-test",
         action="store_true",
         help="Run a 3-second quick test for styling and video pipeline",
+    )
+    parser.add_argument(
+        "--no-scene-assets",
+        action="store_true",
+        help="Disable scene-aware Pexels/Unsplash popups and use the local "
+             "reaction-image folders instead.",
     )
     return parser
 
@@ -354,19 +362,38 @@ def main() -> None:
         story_text_for_matching += " " + " ".join(
             str(s.get("text") or s.get("raw_text") or "") for s in subtitle_segments
         )
-    planned_image_times: List[float] = fixed_image_times(narration_duration, interval_seconds=2.5)
-    maybe_download_story_images(
-        story_images_dir, story_text_for_matching, client=client, min_count=18
-    )
-    popups = choose_story_related_popups(
-        story_images_dir,
-        story_text_for_matching,
-        narration_duration,
-        subtitle_segments=subtitle_segments,
-        planned_times=planned_image_times,
-        min_gap=2.0,
-        max_gap=6.0,
-    )
+
+    popups: List[PopupImage] = []
+    if not args.no_scene_assets and client is not None:
+        try:
+            scene_popups, scene_mapping = build_scene_popups(
+                client=client,
+                script_text=script,
+                narration_duration=narration_duration,
+                out_dir=output_dir / "scene_assets",
+            )
+            popups = scene_popups
+            (output_dir / "scene_map.json").write_text(
+                json.dumps(scene_mapping, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            print(f"Scene-asset pipeline failed: {exc}\nFalling back to local images.")
+
+    if not popups:
+        planned_image_times: List[float] = fixed_image_times(narration_duration, interval_seconds=2.5)
+        maybe_download_story_images(
+            story_images_dir, story_text_for_matching, client=client, min_count=18
+        )
+        popups = choose_story_related_popups(
+            story_images_dir,
+            story_text_for_matching,
+            narration_duration,
+            subtitle_segments=subtitle_segments,
+            planned_times=planned_image_times,
+            min_gap=2.0,
+            max_gap=6.0,
+        )
     if not popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
@@ -395,22 +422,14 @@ def main() -> None:
             print(f"Using local fallback hook image: {hook_image_path.name}")
         else:
             hook_image_path = None
-    if hook_image_path is not None and hook_image_path.exists():
-        hook_duration = 1.5
-        hook_width = 700
-        hook_x = (1080 - hook_width) // 2
-        hook_y = 860
-        hook_popup = PopupImage(
-            path=hook_image_path,
-            start_sec=0.0,
-            end_sec=min(narration_duration - 0.05, hook_duration),
-            x=hook_x,
-            y=hook_y,
-            width=hook_width,
-            play_sfx=False,
-            use_fade=True,
-        )
-        popups = [hook_popup] + [p for p in popups if p.start_sec >= hook_popup.end_sec]
+    # Optional: hook intro video clip (better than a still).
+    base_hook_query = summarize_script_for_image(client, script)
+    hook_video_path = fetch_best_hook_video(
+        client=client,
+        script=script,
+        out_dir=output_dir / "hook_video",
+        base_query=base_hook_query,
+    )
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
@@ -432,6 +451,8 @@ def main() -> None:
         srt_path=subtitle_file,
         popup_images=popups,
         out_video_path=output_video,
+        hook_video_path=hook_video_path,
+        hook_video_duration=1.5,
         duration_seconds=args.duration_seconds,
         burn_subtitles=burn_subtitles,
         popup_sfx_path=Path(args.popup_sfx) if args.popup_sfx else None,
