@@ -18,6 +18,7 @@ me and my friends actually made our own secret language to pass notes. At first,
 >> I froze, snapped the notebook shut immediately. Thankfully, he just made his little joke and moved on. But there was no way I was about to risk my thoughts about this girl being read out loud to the whole class. So the next time I journaled, I switched back to the secret language. To everyone else, it looked like I was just doodling random symbols. But to me, it was the perfect cover. Fast forward years later, I find those old notebooks again. And the problem? I had thrown away the only translator we ever made, which means all the secrets I wrote as a kid are now locked away forever in a language even I don't understand anymore. Guys, what do I
 
 STYLE RULES (match these exactly):
+- use gen alpha phrases and words instead of historical terms
 - The topic given will be a historical event or person tell a story about them in a way that is informational although entertaining, embelished.
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
