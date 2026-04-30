@@ -28,15 +28,13 @@ def build_hook_video_queries(
 ) -> List[str]:
     """Produce 4-6 ranked stock-video search queries for the hook clip.
 
-    Strong, cinematic, *visual* phrases (not topical nouns), e.g.
-    "ancient battle armor", "smoke rising desert", "candle flickering dark".
+    The queries must depict the OVERALL TOPIC of the video (not just the
+    first sentence) — e.g. for a script about Napoleon's Russian campaign:
+    "snowy battlefield soldiers", "winter cavalry charge", "burning village smoke".
     """
     fallback: List[str] = []
     if base_query:
         fallback.append(base_query.strip())
-    first = (script.split(".")[0] if script else "").strip()
-    if first:
-        fallback.append(" ".join(first.split()[:4]))
     fallback.extend(["dramatic cinematic", "epic ancient history"])
     fallback = [q for q in dict.fromkeys(fallback) if q]
 
@@ -53,20 +51,22 @@ def build_hook_video_queries(
                     "content": (
                         "You generate stock-video search queries for the FIRST 1.5 seconds "
                         "of a viral YouTube Short. The queries must produce a CINEMATIC, "
-                        "EYE-CATCHING, motion-rich clip that visually MATCHES the hook of "
-                        "the script (era, setting, action). Use 2-4 visual words per query. "
-                        "Prefer concrete subjects and motion (e.g. 'roman legion marching', "
-                        "'storm clouds rolling', 'sword clashing slow motion'). Avoid "
-                        "abstract nouns, names of people, and topical words like 'history'."
+                        "EYE-CATCHING, motion-rich clip that visually represents the "
+                        "OVERALL TOPIC of the video (the era, setting, environment, or "
+                        "central subject of the whole script — NOT just the first "
+                        "sentence). Use 2-4 visual words per query. Prefer concrete "
+                        "subjects and motion (e.g. 'roman legion marching', 'storm "
+                        "clouds rolling', 'sword clashing slow motion'). Avoid abstract "
+                        "nouns, names of people, and topical words like 'history'."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
                         "Return JSON: {\"queries\": [\"...\", ...]} with 5 queries ranked "
-                        "from MOST visually fitting to fallback-generic. The first must "
-                        "literally depict the subject of the FIRST sentence below.\n\n"
-                        f"FIRST SENTENCE: {first}\n\nFULL SCRIPT:\n{script}\n"
+                        "from MOST visually fitting to fallback-generic. They should "
+                        "visually evoke the TOPIC/THEME of the entire script below.\n\n"
+                        f"SCRIPT:\n{script}\n"
                     ),
                 },
             ],
@@ -188,11 +188,11 @@ def fetch_best_hook_video(
         return None
     print(f"[hook-video] queries: {queries}")
 
-    first_sentence = (script.split(".")[0] if script else "").strip()
     expected = (
-        "A cinematic vertical stock clip whose first frame visually depicts: "
-        f"{first_sentence}. NO on-screen text, subtitles, logos, watermarks, "
-        "or talking-head presenters. Eye-catching, in-motion, well-lit."
+        "A cinematic vertical stock clip whose first frame visually represents "
+        "the OVERALL TOPIC / THEME / setting of the script (not just the first "
+        "sentence). NO on-screen text, subtitles, logos, watermarks, or "
+        "talking-head presenters. Eye-catching, in-motion, well-lit."
     )
 
     best_path: Path | None = None
