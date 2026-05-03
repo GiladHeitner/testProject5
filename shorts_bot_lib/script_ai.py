@@ -14,27 +14,23 @@ SCRIPT_PROMPT_TEMPLATE = """
 this is the topic of a youtube shorts story: {topic_line} keep the topic as it is and continue the story Cater the story to a middle school audience but add non PG details.
 
 use this as example script follow the style:
-This is the unluckiest president in US history. And his story is insane. When he became president, he was already 68, the oldest man to ever take office at the time. People whispered that he was too weak, too fragile. So to prove them wrong, he did something crazy. He delivered the longest inauguration speech in US history, nearly 2 hours long, standing in freezing rain. But that decision cost him everything. Just days later, he caught a cold from that very speech. And only a few weeks after taking office, he was dead. He never signed a single law. He spent more time writing his speech than actually being
+me and my friends actually made our own secret language to pass notes. At first, we tried writing backwards, so if teachers or classmates tried to peak, they couldn't read it quickly. But then we realized if our notebooks ever got confiscated, it would still be easy to figure out. So, we went full spo. We created a whole alphabet, gave each letter its own symbol, and memorized it. Suddenly, we could write full conversations in class, and no one had a clue what we were saying. By high school, we didn't really use it anymore, but I still had all the symbols memorized. One day, I was in class journaling about a crush in the back of my notebook. I wasn't disrupting anyone, but my teacher noticed how into it I was and decided to call me out. He goes, "What are you writing a book over there?" >> Clearly, those aren't notes.
+>> I froze, snapped the notebook shut immediately. Thankfully, he just made his little joke and moved on. But there was no way I was about to risk my thoughts about this girl being read out loud to the whole class. So the next time I journaled, I switched back to the secret language. To everyone else, it looked like I was just doodling random symbols. But to me, it was the perfect cover. Fast forward years later, I find those old notebooks again. And the problem? I had thrown away the only translator we ever made, which means all the secrets I wrote as a kid are now locked away forever in a language even I don't understand anymore. Guys, what do I
 
 STYLE RULES (match these exactly):
-- use gen alpha phrases and words instead of historical terms
+- use gen alpha phrases
 - The topic given will be a historical event or person tell a story about them in a way that is informational although entertaining, embelished.
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
 - DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect.
 - FOCUS ON IMPACT: Do NOT wrap descriptive fluff or narrator asides (like "slow motion, like a movie"). Only wrap the actual event or the most shocking part of the sentence.
-- RAMP LENGTH: two word max wrapping
+- RAMP LENGTH: One word max wrapping
 - RAMP SPACING: NEVER put hyphenated phrases back-to-back. You must space them out evenly throughout the script so the audio has time to return to normal speed between drops.
 - End the video by saying subscribe before I get --banned--!
 - Hook must have a high chance of being used in the title
-- Dont say you used to hate something you still hate something
-- First-person, past tense, told like you're talking to a best friend but they dont know anything in the past dont say remember my highschool bully
-- Fast-paced. Short punchy sentences. No filler.
-- Use quoted dialogue to bring scenes to life
-- Build tension and emotion beat by beat
-- End on a high \u2014 a moment that makes the viewer feel something
+- EVERYTHING IS IN THE PRESENT TENSE
+- First-person, past tense, told like you're talking to a best friend but they dont know anything about you
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
-- Research the topic to write authentically and specifically
 
 Write ONE complete script now.
 """

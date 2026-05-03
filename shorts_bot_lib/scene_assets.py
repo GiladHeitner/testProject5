@@ -95,7 +95,9 @@ _SCENE_SYSTEM = (
     "You split a narration script into visual scenes for a YouTube Short. "
     "Each scene gets a short stock-photo search query (2-5 words, nouns + "
     "visual adjectives only, no proper names, no quotes, no punctuation, no "
-    "verbs). Aim for one scene per visual change in the story."
+    "verbs). Create a NEW scene for every meaningful visual change, action, "
+    "subject, or location shift. Err on the side of MORE scenes, not fewer, "
+    "so the final video has constant fresh imagery."
 )
 
 
@@ -110,14 +112,28 @@ _SCENE_USER = """Return ONLY valid JSON in this exact shape:
 Rules:
 - Concatenated `text` fields, in order, must reproduce the script verbatim
   (you may merge consecutive sentences but never reorder or paraphrase).
-- Aim for between 4 and 10 scenes total.
+- Aim for ~{target_scenes} scenes total (between {min_scenes} and {max_scenes}).
+  Roughly one scene every 2 seconds of narration.
 
 SCRIPT:
 {script}"""
 
 
-def extract_scenes(client: OpenAI, script_text: str) -> List[Scene]:
-    user_prompt = _SCENE_USER.format(script=script_text.strip())
+def extract_scenes(
+    client: OpenAI, script_text: str, narration_duration: float | None = None
+) -> List[Scene]:
+    if narration_duration and narration_duration > 0:
+        target_scenes = max(6, int(round(narration_duration / 2.0)))
+    else:
+        target_scenes = 12
+    min_scenes = max(4, target_scenes - 2)
+    max_scenes = target_scenes + 3
+    user_prompt = _SCENE_USER.format(
+        script=script_text.strip(),
+        target_scenes=target_scenes,
+        min_scenes=min_scenes,
+        max_scenes=max_scenes,
+    )
 
     def _call():
         resp = client.chat.completions.create(
@@ -442,8 +458,8 @@ def build_scene_popups(
         )
 
     print("Extracting scenes for popup assets via LLM...")
-    scenes = extract_scenes(client, script_text)
-    print(f"Got {len(scenes)} scene(s); fetching images...")
+    scenes = extract_scenes(client, script_text, narration_duration=narration_duration)
+    print(f"Got {len(scenes)} scene(s) for {narration_duration:.1f}s narration; fetching images...")
 
     windows = _scene_time_windows(scenes, narration_duration)
 

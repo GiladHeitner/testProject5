@@ -38,6 +38,7 @@ from shorts_bot_lib.runner import (
     pick_random_file,
     print_progress,
 )
+from shorts_bot_lib.keyword_popups import build_keyword_popups
 from shorts_bot_lib.scene_assets import build_scene_popups
 from shorts_bot_lib.script_ai import (
     generate_metadata,
@@ -56,7 +57,6 @@ from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
     generate_voiceover_openai_tts,
 )
-from shorts_bot_lib.hook_video import fetch_best_hook_video
 from shorts_bot_lib.youtube_api import (
     get_youtube_credentials,
     post_pinned_comment,
@@ -143,6 +143,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable scene-aware Pexels/Unsplash popups and use the local "
              "reaction-image folders instead.",
+    )
+    parser.add_argument(
+        "--no-keyword-popups",
+        action="store_true",
+        help="Disable LLM-picked keyword popups timed to spoken phrases.",
     )
     return parser
 
@@ -364,7 +369,25 @@ def main() -> None:
         )
 
     popups: List[PopupImage] = []
-    if not args.no_scene_assets and client is not None:
+    if not args.no_keyword_popups and client is not None and subtitle_segments:
+        try:
+            keyword_popups, keyword_mapping = build_keyword_popups(
+                client=client,
+                script_text=script,
+                word_segments=subtitle_segments,
+                narration_duration=narration_duration,
+                out_dir=output_dir / "scene_assets",
+            )
+            popups = keyword_popups
+            if keyword_mapping:
+                (output_dir / "keyword_map.json").write_text(
+                    json.dumps(keyword_mapping, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+        except Exception as exc:
+            print(f"Keyword popup pipeline failed: {exc}\nFalling back to scene assets.")
+
+    if not popups and not args.no_scene_assets and client is not None:
         try:
             scene_popups, scene_mapping = build_scene_popups(
                 client=client,
@@ -422,15 +445,6 @@ def main() -> None:
             print(f"Using local fallback hook image: {hook_image_path.name}")
         else:
             hook_image_path = None
-    # Optional: hook intro video clip (better than a still).
-    base_hook_query = summarize_script_for_image(client, script)
-    hook_video_path = fetch_best_hook_video(
-        client=client,
-        script=script,
-        out_dir=output_dir / "hook_video",
-        base_query=base_hook_query,
-    )
-
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
         project_root / "assets" / "sounds_normalized",
@@ -451,8 +465,6 @@ def main() -> None:
         srt_path=subtitle_file,
         popup_images=popups,
         out_video_path=output_video,
-        hook_video_path=hook_video_path,
-        hook_video_duration=1.5,
         duration_seconds=args.duration_seconds,
         burn_subtitles=burn_subtitles,
         popup_sfx_path=Path(args.popup_sfx) if args.popup_sfx else None,
@@ -525,6 +537,12 @@ def main() -> None:
         post_pinned_comment(_yt, video_id, script)
     else:
         print("Upload skipped. Run with --upload to publish.")
+
+    # Cleanup intermediate image/video assets after the short is rendered (and uploaded).
+    for sub in ("scene_assets", "hook_image", "hook_video"):
+        target = output_dir / sub
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 if __name__ == "__main__":
