@@ -69,7 +69,7 @@ def judge_image(
     system = (
         "You are a strict image quality reviewer for a YouTube Shorts pipeline. "
         "You must reject images that are blurry, low-res, irrelevant, have "
-        "watermarks/logos/overlaid text, or look like an obvious AI glitch. "
+        "watermarks/overlaid text, or look like an obvious AI glitch. "
         "Also reject images that are not vertical-friendly (subject too tiny)."
     )
     user_text = (

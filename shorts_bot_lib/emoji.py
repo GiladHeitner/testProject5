@@ -49,17 +49,32 @@ def emoji_codepoint_path(emoji: str) -> str:
     return "-".join(codepoints)
 
 
+def _emoji_codepoint_path_with_fe0f(emoji: str) -> str:
+    codepoints = []
+    for ch in emoji:
+        cp = ord(ch)
+        codepoints.append(f"{cp:x}")
+    return "-".join(codepoints)
+
+
 def download_twemoji_png(emoji: str, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     code = emoji_codepoint_path(emoji)
     out_file = out_dir / f"{code}-ios.png"
     if out_file.exists():
         return out_file
-    apple_url = (
-        f"https://cdn.jsdelivr.net/gh/iamcal/emoji-data@master/img-apple-64/{code}.png"
-    )
-    response = requests.get(apple_url, timeout=60)
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed to download emoji image for {emoji}: {apple_url}")
-    out_file.write_bytes(response.content)
-    return out_file
+    base = "https://cdn.jsdelivr.net/gh/iamcal/emoji-data@master/img-apple-64"
+    urls = [f"{base}/{code}.png"]
+    # Some emoji (notably ♥️/❤️) require FE0F in the filename.
+    if "\ufe0f" in emoji:
+        code2 = _emoji_codepoint_path_with_fe0f(emoji)
+        if code2 != code:
+            urls.append(f"{base}/{code2}.png")
+    last_status = None
+    for apple_url in urls:
+        response = requests.get(apple_url, timeout=60)
+        last_status = response.status_code
+        if response.status_code == 200:
+            out_file.write_bytes(response.content)
+            return out_file
+    raise RuntimeError(f"Failed to download emoji image for {emoji} (last={last_status}): {urls[-1]}")

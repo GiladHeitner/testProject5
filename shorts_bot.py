@@ -26,9 +26,7 @@ from shorts_bot_lib.audio import smart_speed_ramp, ensure_normalized_sounds
 from shorts_bot_lib.images import (
     choose_popup_images,
     choose_story_related_popups,
-    fetch_unsplash_hook_image,
     fixed_image_times,
-    generate_hook_image,
     maybe_download_story_images,
     maybe_generate_images,
 )
@@ -43,15 +41,15 @@ from shorts_bot_lib.scene_assets import build_scene_popups
 from shorts_bot_lib.script_ai import (
     generate_metadata,
     generate_script,
-    summarize_script_for_image,
 )
-from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
+from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments, write_karaoke_block_ass
 from shorts_bot_lib.text import get_highlight_timestamps
 from shorts_bot_lib.transcribe import (
     get_whisper_word_timestamps,
     transcribe_audio_to_srt,
 )
-from shorts_bot_lib.types import PopupImage
+from shorts_bot_lib.reddit_card import RedditCardSpec, render_reddit_card_png
+from shorts_bot_lib.types import PopupImage, Word
 from shorts_bot_lib.video import compose_video, pick_sfx_for_popups
 from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
@@ -185,25 +183,80 @@ def _run_images_only(
         raise RuntimeError(
             "No script found for --images-only. Provide --script or ensure output/script.txt exists."
         )
-    print("Generating hook image...")
-    hook_image_path = generate_hook_image(
-        openai_client=client,
-        gemini_api_key=gemini_key,
-        script=script,
-        out_dir=output_dir / "hook_image",
+    hook_text = script.split(".")[0].strip()
+    if not hook_text:
+        hook_text = script.strip()
+    if not hook_text:
+        raise RuntimeError("Script is empty; cannot render reddit card.")
+    out_path = render_reddit_card_png(
+        title=hook_text,
+        out_path=output_dir / "reddit_card" / "reddit_card.png",
+        spec=RedditCardSpec(),
     )
-    if hook_image_path is None or not hook_image_path.exists():
-        hook_query = summarize_script_for_image(client, script)
-        print(f"Falling back to Unsplash search: {hook_query!r}")
-        hook_image_path = fetch_unsplash_hook_image(hook_query, output_dir / "hook_image")
-    if hook_image_path is not None and hook_image_path.exists():
-        print(f"Hook image saved: {hook_image_path}")
+    print(f"Reddit card saved: {out_path}")
     print("Done (images-only).")
 
 
 def main() -> None:
     load_dotenv()
     args = _build_arg_parser().parse_args()
+
+    def _norm_words(txt: str) -> list[str]:
+        return [w for w in re.sub(r"[^a-z0-9 ]+", " ", txt.lower()).split() if w]
+
+    def _find_spoken_window(phrase: str, word_segs: List[dict]) -> tuple[float, float] | None:
+        """Return (start,end) when `phrase` is spoken using whisper word-level segments.
+
+        Strategy:
+        1. Try an exact contiguous match of the normalized phrase.
+        2. If that fails, find the first occurrence of the title's first word
+           and the first occurrence of the title's last word that comes after
+           it -- this handles punctuation / minor transcription differences.
+        3. Otherwise fall back to the first occurrence of the first word.
+        """
+        target = _norm_words(phrase)
+        if not target or not word_segs:
+            return None
+        norm_words: list[tuple[str, float, float]] = []
+        for seg in word_segs:
+            w = str(seg.get("text") or seg.get("raw_text") or "").strip()
+            nw = _norm_words(w)
+            if not nw:
+                continue
+            try:
+                s = float(seg["start"])
+                e = float(seg["end"])
+            except Exception:
+                continue
+            norm_words.append((nw[0], s, e))
+        if not norm_words:
+            return None
+
+        window = len(target)
+        if window <= len(norm_words):
+            target_str = " ".join(target)
+            for i in range(0, len(norm_words) - window + 1):
+                chunk = " ".join(norm_words[i + j][0] for j in range(window))
+                if chunk == target_str:
+                    return norm_words[i][1], norm_words[i + window - 1][2]
+
+        # Fuzzy match: first(first_word) -> first(last_word) after it.
+        head = target[0]
+        tail = target[-1]
+        first_idx: int | None = None
+        for i, (w, _s, _e) in enumerate(norm_words):
+            if w == head:
+                first_idx = i
+                break
+        if first_idx is not None and head != tail:
+            for j in range(first_idx + 1, len(norm_words)):
+                if norm_words[j][0] == tail:
+                    return norm_words[first_idx][1], norm_words[j][2]
+
+        # Fallback: first token only.
+        if first_idx is not None:
+            return norm_words[first_idx][1], norm_words[first_idx][2]
+        return None
 
     if args.images_only and not args.generate_images:
         args.generate_images = True
@@ -420,31 +473,136 @@ def main() -> None:
     if not popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
-    hook_image_path = generate_hook_image(
-        openai_client=client,
-        gemini_api_key=gemini_key,
-        script=script,
-        out_dir=output_dir / "hook_image",
-    )
-    if hook_image_path is None or not hook_image_path.exists():
-        hook_query = summarize_script_for_image(client, script)
-        print(f"Falling back to Unsplash search: {hook_query!r}")
-        hook_image_path = fetch_unsplash_hook_image(hook_query, output_dir / "hook_image")
-    if hook_image_path is None or not hook_image_path.exists():
-        fallback_dirs = [story_images_dir, images_dir]
-        fallback_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-        fallback_candidates = []
-        for folder in fallback_dirs:
-            if folder.exists():
-                fallback_candidates.extend(
-                    p for p in folder.iterdir()
-                    if p.is_file() and p.suffix.lower() in fallback_exts
-                )
-        if fallback_candidates:
-            hook_image_path = random.choice(fallback_candidates)
-            print(f"Using local fallback hook image: {hook_image_path.name}")
-        else:
-            hook_image_path = None
+    # Add a Reddit-style hook card popup at the beginning.
+    try:
+        # Title = the script's first paragraph (before the first blank line).
+        # Normalize line endings so CRLF files still split correctly.
+        normalized_script = script.replace("\r\n", "\n").replace("\r", "\n")
+        first_block = normalized_script.split("\n\n", 1)[0].strip()
+        # Safety: if there's no blank line, fall back to the first sentence
+        # so we don't put the entire script on the card.
+        if not first_block or first_block == normalized_script.strip():
+            first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
+        # Extra safety: if title is unreasonably long, take only first sentence.
+        if len(first_block.split()) > 20:
+            first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
+        hook_text = first_block or script.split(".")[0].strip()
+        if hook_text:
+            card_dir = output_dir / "reddit_card"
+            card_path = render_reddit_card_png(
+                title=hook_text,
+                out_path=card_dir / "reddit_card.png",
+                spec=RedditCardSpec(
+                    awards_dir=(
+                        Path(os.environ.get("REDDIT_AWARDS_DIR", "")).expanduser()
+                        if os.environ.get("REDDIT_AWARDS_DIR", "").strip()
+                        else (project_root / "assets" / "awards" if (project_root / "assets" / "awards").exists() else None)
+                    )
+                ),
+            )
+            card_width = 1040
+            tail = 0.10
+            # Prefer the actual subtitles.srt timestamps (what gets displayed),
+            # then narration_reference_segments, then in-memory subtitle_segments.
+            srt_word_segments: List[dict] = []
+            srt_path = output_dir / "subtitles.srt"
+            if srt_path.exists():
+                try:
+                    srt_word_segments = read_srt_segments(srt_path)
+                except Exception as exc:
+                    print(f"Could not read {srt_path}: {exc}")
+            win = _find_spoken_window(hook_text, srt_word_segments) if srt_word_segments else None
+            if win is None and narration_reference_segments:
+                win = _find_spoken_window(hook_text, narration_reference_segments)
+            if win is None and subtitle_segments:
+                win = _find_spoken_window(hook_text, subtitle_segments)
+            n_words = max(1, len(hook_text.split()))
+            est_dur = n_words * 0.42 + 0.7  # only used when no whisper match
+            if win is not None:
+                start_sec = 0.0
+                end_sec = min(narration_duration - 0.05, float(win[1]) + tail)
+                if end_sec <= start_sec:
+                    end_sec = min(narration_duration - 0.05, start_sec + est_dur)
+                print(f"Reddit card window (whisper): {start_sec:.2f}s -> {end_sec:.2f}s for title {hook_text!r}")
+            else:
+                start_sec = 0.0
+                end_sec = min(narration_duration - 0.05, est_dur)
+                print(f"Reddit card window (no spoken match, using estimate): {start_sec:.2f}s -> {end_sec:.2f}s")
+            popups.insert(
+                0,
+                PopupImage(
+                    path=card_path,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    x=(1080 - card_width) // 2,
+                    y=670,
+                    width=card_width,
+                    play_sfx=False,
+                    use_fade=True,
+                    preserve_aspect=True,
+                ),
+            )
+
+            # Suppress other popups while the card is on screen: drop popups
+            # inside the card window, and trim ones that start before it ends.
+            card_end = float(end_sec)
+            min_visible = 0.30
+            kept: List[PopupImage] = []
+            for p in popups:
+                if p.path == card_path:
+                    kept.append(p)
+                    continue
+                if p.end_sec <= card_end + 0.05:
+                    continue
+                if p.start_sec < card_end + 0.05:
+                    new_start = card_end + 0.05
+                    if p.end_sec - new_start < min_visible:
+                        continue
+                    p.start_sec = new_start
+                kept.append(p)
+            popups = sorted(kept, key=lambda p: p.start_sec)
+
+            # Make sure popups resume quickly after the card disappears: if the
+            # first non-card popup starts more than 1.5s after the card ends,
+            # pull it forward to ~0.3s after card ends.
+            max_lead = 1.5
+            quick_resume = card_end + 0.30
+            for p in popups:
+                if p.path == card_path:
+                    continue
+                if p.start_sec - card_end > max_lead:
+                    delta = p.start_sec - quick_resume
+                    if delta > 0:
+                        new_end = max(quick_resume + min_visible, p.end_sec - delta)
+                        p.start_sec = quick_resume
+                        p.end_sec = new_end
+                break
+
+            # Suppress subtitles while the card is on screen by rebuilding the
+            # karaoke .ass from word segments that start at/after card_end.
+            try:
+                if subtitle_segments:
+                    filtered_words: List[Word] = []
+                    for seg in subtitle_segments:
+                        try:
+                            s = float(seg["start"])
+                            e = float(seg["end"])
+                        except Exception:
+                            continue
+                        if s < card_end:
+                            continue
+                        text = str(seg.get("raw_text") or seg.get("text") or "").strip()
+                        if not text:
+                            continue
+                        filtered_words.append(Word(text=text, start=s, end=max(e, s + 0.05)))
+                    if filtered_words:
+                        write_karaoke_block_ass(filtered_words, subtitle_file)
+            except Exception as exc:
+                print(f"Subtitle suppression failed: {exc}")
+        popups.sort(key=lambda p: p.start_sec)
+    except Exception as exc:
+        print(f"Reddit hook card generation failed: {exc}")
+
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
         project_root / "assets" / "sounds_normalized",
@@ -527,7 +685,7 @@ def main() -> None:
             description=description,
             tags=tags,
             privacy=args.privacy,
-            thumbnail_file=hook_image_path if hook_image_path and hook_image_path.exists() else None,
+            thumbnail_file=None,
         )
         print(f"Uploaded: {video_url}")
         print("Note: Shorts can take 1\u20135 min to process before appearing in the feed.")
@@ -539,7 +697,7 @@ def main() -> None:
         print("Upload skipped. Run with --upload to publish.")
 
     # Cleanup intermediate image/video assets after the short is rendered (and uploaded).
-    for sub in ("scene_assets", "hook_image", "hook_video"):
+    for sub in ("scene_assets", "hook_video"):
         target = output_dir / sub
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)

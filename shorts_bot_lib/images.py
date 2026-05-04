@@ -44,9 +44,10 @@ def _gemini_client(api_key: str):
 
 def _gemini_image_models() -> list[str]:
     env_model = os.environ.get("GEMINI_IMAGE_MODEL", "").strip()
+    # IDs from https://ai.google.dev/gemini-api/docs/image-generation — older
+    # names (e.g. gemini-3-flash-image) 404; Nano Banana 2 is 3.1 preview.
     fallbacks = [
-        "gemini-3-flash-image",
-        "gemini-2.5-flash-image-preview",
+        "gemini-3.1-flash-image-preview",
         "gemini-2.5-flash-image",
         "gemini-2.0-flash-preview-image-generation",
     ]

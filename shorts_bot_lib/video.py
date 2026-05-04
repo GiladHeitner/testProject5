@@ -143,30 +143,26 @@ def build_filter_complex(
         popup_len = max(0.2, popup.end_sec - popup.start_sec)
         fade_dur = min(0.25, popup_len * 0.35)
         fade_out_start = max(popup.start_sec, popup.end_sec - fade_dur)
+        is_reddit_card = popup.path.name.lower() == "reddit_card.png"
+        scale_part = (
+            f"scale={popup.width}:-1,"
+            if (popup.is_emoji or popup.preserve_aspect or is_reddit_card)
+            else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
+        )
         chains.append(
             (
                 f"[{i + 2}:v]"
-                + (
-                    f"scale={popup.width}:-1,"
-                    if (popup.is_emoji or popup.preserve_aspect)
-                    else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
-                )
-                +
-                f"format=rgba,"
-                f"fade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f}:alpha=1"
-                f"[img{i}]"
+                + scale_part
+                + f"format=rgba,"
+                  f"fade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f}:alpha=1"
+                  f"[img{i}]"
             )
             if popup.use_fade
             else (
                 f"[{i + 2}:v]"
-                + (
-                    f"scale={popup.width}:-1,"
-                    if (popup.is_emoji or popup.preserve_aspect)
-                    else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
-                )
-                +
-                f"format=rgba"
-                f"[img{i}]"
+                + scale_part
+                + f"format=rgba"
+                  f"[img{i}]"
             )
         )
 

@@ -347,7 +347,7 @@ def _fetch_scene_image(
     target_openai = out_dir / f"{base_name}_generated.jpg"
     expected = (
         f"A sharp, relevant portrait-friendly scene image for: {scene.query}. "
-        "No watermark, no logos, no overlaid text."
+        "No watermark, no overlaid text."
     )
 
     if pexels_key:

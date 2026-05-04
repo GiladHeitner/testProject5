@@ -22,6 +22,10 @@ from .types import PopupImage
 
 KEYWORD_LLM_MODEL = os.environ.get("KEYWORD_LLM_MODEL", "gpt-4o-mini")
 
+# When the next keyword is spoken soon after this one, shorten this popup's
+# end (never its start) so both can appear; never shorter than this many seconds.
+_MIN_KEYWORD_VISIBLE_SEC = 0.28
+
 
 _KEYWORD_SYSTEM = (
     "You pick the most VISUAL, punchy phrases from a YouTube Shorts narration "
@@ -152,8 +156,9 @@ def build_keyword_popups(
     gemini_key = os.environ.get("GEMINI_API_KEY")
 
     if target_count is None:
-        # ~ one keyword every 2.5 seconds, capped sensibly.
-        target_count = max(6, min(16, int(round(narration_duration / 2.5))))
+        # ~ one keyword every 2.5 seconds, capped by 75% of video seconds.
+        cap = max(6, int(round(narration_duration * 0.75)))
+        target_count = max(6, min(cap, int(round(narration_duration / 2.5))))
     print(f"Picking ~{target_count} keyword popups for {narration_duration:.1f}s narration...")
 
     keywords = extract_keywords(client, script_text, target_count)
@@ -182,15 +187,29 @@ def build_keyword_popups(
     if not timed:
         return [], []
 
-    # Sort by start time and enforce a min gap so popups don't overlap.
+    # Sort by start; trim each popup's end only when the next would start too soon
+    # (keeps each start tied to the spoken phrase; drops a keyword only if it
+    # cannot show at all after trimming).
     timed.sort(key=lambda t: t[1])
     spaced: List[tuple[dict, float, float]] = []
-    last_end = -1.0
-    for kw, s, e in timed:
-        if s < last_end + min_gap:
+    n = len(timed)
+    tail = narration_duration - 0.05
+    for i in range(n):
+        kw, s, e = timed[i]
+        if i + 1 < n:
+            s_next = timed[i + 1][1]
+            max_end = min(s_next - min_gap, tail)
+        else:
+            max_end = tail
+        e = min(e, max_end)
+        if e <= s:
             continue
+        if e - s < _MIN_KEYWORD_VISIBLE_SEC:
+            stretched = min(s + _MIN_KEYWORD_VISIBLE_SEC, max_end)
+            if stretched <= s:
+                continue
+            e = stretched
         spaced.append((kw, s, e))
-        last_end = e
 
     popups: List[PopupImage] = []
     mapping: List[dict] = []
