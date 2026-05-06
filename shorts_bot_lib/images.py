@@ -44,9 +44,64 @@ def _gemini_client(api_key: str):
 
 def _gemini_image_models() -> list[str]:
     env_model = os.environ.get("GEMINI_IMAGE_MODEL", "").strip()
-    # Single image-capable model we rely on (see ai.google.dev image-generation docs).
-    default_model = "gemini-3.1-flash-image-preview"
+    # Default: Gemini 2.5 Flash Image (Nano Banana) — stable billing path in AI Studio.
+    default_model = "gemini-2.5-flash-image"
     return [env_model] if env_model else [default_model]
+
+
+def _gemini_billing_exhausted(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "prepayment credits" in msg and "depleted" in msg
+
+
+def _gemini_transient_api_error(exc: Exception) -> bool:
+    if _gemini_billing_exhausted(exc):
+        return False
+    msg = str(exc).lower()
+    if "404" in msg or "not found" in msg or "not supported" in msg:
+        return False
+    if "permission" in msg or "api key" in msg:
+        return False
+    return any(
+        s in msg
+        for s in (
+            "429",
+            "resource_exhausted",
+            "503",
+            "500",
+            "502",
+            "504",
+            "unavailable",
+            "deadline",
+            "timeout",
+            "temporarily",
+            "try again",
+            "overloaded",
+        )
+    )
+
+
+def _gemini_generate_content_image(client, model: str, prompt: str, config) -> object:
+    """Single-model generate_content with backoff on transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=config,
+            )
+        except Exception as exc:
+            last_exc = exc
+            if _gemini_billing_exhausted(exc):
+                raise
+            if not _gemini_transient_api_error(exc):
+                raise
+            if attempt >= 3:
+                raise
+            delay = 1.25 * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+            time.sleep(delay)
+    raise RuntimeError("unreachable") from last_exc
 
 
 def _gemini_extract_inline_image_bytes(response) -> bytes | None:
@@ -85,10 +140,8 @@ def _try_gemini_hook_image(
     last_exc: Exception | None = None
     for model in _gemini_image_models():
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
+            response = _gemini_generate_content_image(
+                client, model, prompt, config
             )
             data = _gemini_extract_inline_image_bytes(response)
             if data:

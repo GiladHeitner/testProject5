@@ -25,8 +25,10 @@ import requests
 from openai import OpenAI
 
 from .images import (
+    _gemini_billing_exhausted,
     _gemini_client,
     _gemini_extract_inline_image_bytes,
+    _gemini_generate_content_image,
     _gemini_image_models,
 )
 from .image_judge import judge_image
@@ -43,11 +45,6 @@ REQUEST_TIMEOUT = 30
 
 # After Google returns billing/quota exhaustion, skip Gemini for the rest of this process.
 _gemini_scene_skip_billing: bool = False
-
-
-def _gemini_billing_exhausted(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return "prepayment credits" in msg and "depleted" in msg
 
 
 # --------------------------------------------------------------------------- #
@@ -282,10 +279,8 @@ def _generate_gemini_image(api_key: str, query: str, dst: Path) -> bool:
     last_exc: Optional[Exception] = None
     for model in _gemini_image_models():
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
+            response = _gemini_generate_content_image(
+                client, model, prompt, config
             )
             data = _gemini_extract_inline_image_bytes(response)
             if data:
