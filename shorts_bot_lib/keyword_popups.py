@@ -156,9 +156,8 @@ def build_keyword_popups(
     gemini_key = os.environ.get("GEMINI_API_KEY")
 
     if target_count is None:
-        # ~0.6 keywords per second (≈6 popups for a 10s clip), capped by 75% of seconds.
-        cap = max(6, int(round(narration_duration * 0.75)))
-        target_count = max(6, min(cap, int(round(narration_duration * 0.6))))
+        # ~0.6 keywords per second (≈6 popups for a 10s clip); no upper cap.
+        target_count = max(6, int(round(narration_duration * 0.6)))
     print(f"Picking ~{target_count} keyword popups for {narration_duration:.1f}s narration...")
 
     keywords = extract_keywords(client, script_text, target_count)
