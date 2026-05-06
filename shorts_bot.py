@@ -467,7 +467,7 @@ def main() -> None:
             narration_duration,
             subtitle_segments=subtitle_segments,
             planned_times=planned_image_times,
-            min_gap=2.0,
+            min_gap=0.0,
             max_gap=6.0,
         )
     if not popups:

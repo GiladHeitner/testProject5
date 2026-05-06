@@ -147,7 +147,7 @@ def build_keyword_popups(
     popup_play_sfx: bool = True,
     target_count: int | None = None,
     popup_duration: float = 1.6,
-    min_gap: float = 0.6,
+    min_gap: float = 0.0,
 ) -> tuple[List[PopupImage], List[dict]]:
     """Pick keywords and produce timed popups when each phrase is spoken."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -156,9 +156,9 @@ def build_keyword_popups(
     gemini_key = os.environ.get("GEMINI_API_KEY")
 
     if target_count is None:
-        # ~ one keyword every 2.5 seconds, capped by 75% of video seconds.
+        # ~0.6 keywords per second (≈6 popups for a 10s clip), capped by 75% of seconds.
         cap = max(6, int(round(narration_duration * 0.75)))
-        target_count = max(6, min(cap, int(round(narration_duration / 2.5))))
+        target_count = max(6, min(cap, int(round(narration_duration * 0.6))))
     print(f"Picking ~{target_count} keyword popups for {narration_duration:.1f}s narration...")
 
     keywords = extract_keywords(client, script_text, target_count)
