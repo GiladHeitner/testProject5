@@ -29,6 +29,7 @@ STYLE RULES (match these exactly):
 - EVERYTHING IS IN THE PRESENT TENSE
 - Output plain dialogue only. No stage directions, no emojis, no section labels.
 - Dont drag out the end of the story by giving a lesson
+- End ON A CLIFFHANGER
 
 Write ONE complete script now.
 """
