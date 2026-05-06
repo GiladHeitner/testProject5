@@ -500,7 +500,7 @@ def main() -> None:
                     )
                 ),
             )
-            card_width = 1040
+            card_width = 880
             tail = 0.10
             # Prefer the actual subtitles.srt timestamps (what gets displayed),
             # then narration_reference_segments, then in-memory subtitle_segments.
@@ -535,7 +535,7 @@ def main() -> None:
                     start_sec=start_sec,
                     end_sec=end_sec,
                     x=(1080 - card_width) // 2,
-                    y=670,
+                    y=470,
                     width=card_width,
                     play_sfx=False,
                     use_fade=True,

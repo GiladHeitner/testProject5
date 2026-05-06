@@ -6,6 +6,7 @@ __pycache__/
 .env
 youtube_token.json
 client_secret.json
+client_secret*.json
 .DS_Store
 assets/gameplay/*
 !assets/gameplay/.gitkeep
