@@ -41,6 +41,14 @@ IMAGE_GEN_MODEL = "gpt-image-1"
 
 REQUEST_TIMEOUT = 30
 
+# After Google returns billing/quota exhaustion, skip Gemini for the rest of this process.
+_gemini_scene_skip_billing: bool = False
+
+
+def _gemini_billing_exhausted(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "prepayment credits" in msg and "depleted" in msg
+
 
 # --------------------------------------------------------------------------- #
 # Retry helpers
@@ -248,6 +256,9 @@ def _download_image(url: str, dst: Path) -> bool:
 
 def _generate_gemini_image(api_key: str, query: str, dst: Path) -> bool:
     """Generate a scene image with Gemini, trying the model fallback chain."""
+    global _gemini_scene_skip_billing
+    if _gemini_scene_skip_billing:
+        return False
     prompt = (
         f"{query}. Cinematic, photorealistic stock-photo style, "
         f"vertical 9:16 composition, soft natural lighting, no text, "
@@ -285,6 +296,14 @@ def _generate_gemini_image(api_key: str, query: str, dst: Path) -> bool:
             print(f"[gemini-img] {model} returned no inline image data.")
         except Exception as exc:
             last_exc = exc
+            if _gemini_billing_exhausted(exc):
+                _gemini_scene_skip_billing = True
+                print(
+                    "[gemini-img] Gemini quota/billing exhausted; skipping Gemini for "
+                    "this run (stock + OpenAI fallbacks still apply). "
+                    "Top up: https://ai.google.dev/gemini-api/docs/billing"
+                )
+                return False
             msg = str(exc)
             if "404" in msg or "not found" in msg.lower() or "not supported" in msg.lower():
                 print(f"[gemini-img] {model} unavailable, trying next...")
