@@ -353,16 +353,18 @@ def _fetch_scene_image(
     openai_client: OpenAI,
     pexels_key: Optional[str],
     unsplash_key: Optional[str],
-    gemini_key: Optional[str],
+    gemini_key: Optional[str],  # accepted for compatibility; AI gen is disabled
 ) -> Optional[Path]:
     base_name = f"scene_{scene.index:02d}_{scene.slug}"
     target_jpg = out_dir / f"{base_name}.jpg"
-    target_gemini = out_dir / f"{base_name}_generated.png"
-    target_openai = out_dir / f"{base_name}_generated.jpg"
     expected = (
         f"A sharp, relevant portrait-friendly scene image for: {scene.query}. "
         "No watermark, no overlaid text."
     )
+
+    best_path: Optional[Path] = None
+    best_score: int = -1
+    best_label: str = ""
 
     if pexels_key:
         url = _search_pexels(pexels_key, scene.query)
@@ -372,8 +374,11 @@ def _fetch_scene_image(
             if verdict.ok:
                 return target_jpg
             print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
-            if gemini_key and _generate_gemini_image(gemini_key, scene.query, target_gemini):
-                return target_gemini
+            if verdict.score > best_score:
+                best_score = verdict.score
+                best_label = "pexels"
+                best_path = out_dir / f"{base_name}_best_pexels.jpg"
+                best_path.write_bytes(target_jpg.read_bytes())
 
     if unsplash_key:
         url = _search_unsplash(unsplash_key, scene.query)
@@ -383,27 +388,15 @@ def _fetch_scene_image(
             if verdict.ok:
                 return target_jpg
             print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
-            if gemini_key and _generate_gemini_image(gemini_key, scene.query, target_gemini):
-                return target_gemini
+            if verdict.score > best_score:
+                best_score = verdict.score
+                best_label = "unsplash"
+                best_path = out_dir / f"{base_name}_best_unsplash.jpg"
+                best_path.write_bytes(target_jpg.read_bytes())
 
-    if gemini_key and _generate_gemini_image(gemini_key, scene.query, target_gemini):
-        verdict = judge_image(client=openai_client, image_path=target_gemini, expected=expected)
-        if verdict.ok:
-            return target_gemini
-        print(f"   judge REJECT gemini (score={verdict.score}): {verdict.reason}")
-
-    if _generate_openai_image(openai_client, scene.query, target_openai):
-        print(f"   openai    -> {target_openai.name}")
-        verdict = judge_image(client=openai_client, image_path=target_openai, expected=expected)
-        if verdict.ok:
-            return target_openai
-        print(f"   judge REJECT openai (score={verdict.score}): {verdict.reason}")
-        if gemini_key and _generate_gemini_image(gemini_key, scene.query, target_gemini):
-            verdict2 = judge_image(client=openai_client, image_path=target_gemini, expected=expected)
-            if verdict2.ok:
-                return target_gemini
-            print(f"   judge REJECT gemini replacement (score={verdict2.score}): {verdict2.reason}")
-        return target_openai
+    if best_path is not None:
+        print(f"   accept best stock from {best_label} (score={best_score})")
+        return best_path
 
     print(f"   FAILED to obtain image for scene {scene.index}")
     return None
