@@ -574,7 +574,9 @@ def main() -> None:
                 ),
             )
             card_width = 880
-            tail = 0.10
+            # Cut the card the moment the hook is finished being spoken (no
+            # trailing buffer) and never let it sit on screen longer than this.
+            card_max_visible = 2.5
             # Prefer the actual subtitles.srt timestamps (what gets displayed),
             # then narration_reference_segments, then in-memory subtitle_segments.
             srt_word_segments: List[dict] = []
@@ -590,15 +592,15 @@ def main() -> None:
             if win is None and subtitle_segments:
                 win = _find_spoken_window(hook_text, subtitle_segments)
             n_words = max(1, len(hook_text.split()))
-            est_dur = n_words * 0.42 + 0.7  # only used when no whisper match
+            est_dur = min(card_max_visible, n_words * 0.42 + 0.5)
+            start_sec = 0.0
+            tail_max = start_sec + card_max_visible
             if win is not None:
-                start_sec = 0.0
-                end_sec = min(narration_duration - 0.05, float(win[1]) + tail)
+                end_sec = min(narration_duration - 0.05, float(win[1]), tail_max)
                 if end_sec <= start_sec:
                     end_sec = min(narration_duration - 0.05, start_sec + est_dur)
                 print(f"Reddit card window (whisper): {start_sec:.2f}s -> {end_sec:.2f}s for title {hook_text!r}")
             else:
-                start_sec = 0.0
                 end_sec = min(narration_duration - 0.05, est_dur)
                 print(f"Reddit card window (no spoken match, using estimate): {start_sec:.2f}s -> {end_sec:.2f}s")
             popups.insert(
