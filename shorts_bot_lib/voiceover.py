@@ -65,22 +65,58 @@ def generate_voiceover_from_cloner_script(
     env["TEXT"] = strip_script_markup(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
-    result = subprocess.run(
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    # Heuristic phase markers — match common substrings emitted by huggingface
+    # / TTS pipelines so the UI's sub-progress bar moves while the model runs.
+    phases: list[tuple[str, int, str]] = [
+        ("loading", 1, "Loading voice model"),
+        ("downloading", 1, "Downloading model files"),
+        ("cloning", 2, "Cloning reference voice"),
+        ("synthesi", 3, "Synthesizing speech"),
+        ("generating", 3, "Synthesizing speech"),
+        ("saving", 4, "Saving audio"),
+        ("post", 4, "Post-processing audio"),
+    ]
+    total_phases = 5  # last 5/5 is the ffmpeg encode below
+    print_sub_progress(0, total_phases, "Starting voice cloner")
+
+    proc = subprocess.Popen(
         ["bash", str(run_clone_path)],
         cwd=str(run_clone_path.parent),
         env=env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
-    if result.returncode != 0:
+    captured: list[str] = []
+    last_phase: int = 0
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        captured.append(line)
+        print(f"[adam] {line}", flush=True)
+        low = line.lower()
+        for needle, phase_idx, label in phases:
+            if needle in low and phase_idx > last_phase:
+                last_phase = phase_idx
+                print_sub_progress(phase_idx, total_phases, label)
+                break
+    rc = proc.wait()
+    if rc != 0:
         raise RuntimeError(
             "Adam run_clone.sh failed.\n"
-            f"stdout:\n{result.stdout.strip()}\n\nstderr:\n{result.stderr.strip()}"
+            + "\n".join(captured[-20:])
         )
+
     transformed = tmp_wav.with_name(tmp_wav.stem + "_sp.wav")
     source_audio = transformed if transformed.exists() else tmp_wav
     if not source_audio.exists():
         raise RuntimeError("Adam cloner did not produce output audio.")
+    print_sub_progress(4, total_phases, "Encoding mp3")
     run(
         f"ffmpeg -y -i {shlex.quote(str(source_audio))} "
         f"-c:a libmp3lame -q:a 2 {shlex.quote(str(out_audio_path))}"
@@ -89,6 +125,7 @@ def generate_voiceover_from_cloner_script(
         tmp_wav.unlink()
     if transformed.exists():
         transformed.unlink()
+    print_sub_progress(total_phases, total_phases, "Voiceover ready")
 
 
 def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_path: Path) -> None:
