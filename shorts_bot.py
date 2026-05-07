@@ -147,6 +147,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable LLM-picked keyword popups timed to spoken phrases.",
     )
+    parser.add_argument(
+        "--no-fallback-popups",
+        action="store_true",
+        help="Disable the local reaction-image fallback popups when scene "
+             "assets and keyword popups produce nothing.",
+    )
     return parser
 
 
@@ -456,7 +462,7 @@ def main() -> None:
         except Exception as exc:
             print(f"Scene-asset pipeline failed: {exc}\nFalling back to local images.")
 
-    if not popups:
+    if not popups and not args.no_fallback_popups:
         planned_image_times: List[float] = fixed_image_times(narration_duration, interval_seconds=2.5)
         maybe_download_story_images(
             story_images_dir, story_text_for_matching, client=client, min_count=18
@@ -470,7 +476,7 @@ def main() -> None:
             min_gap=0.0,
             max_gap=6.0,
         )
-    if not popups:
+    if not popups and not args.no_fallback_popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
     # Add a Reddit-style hook card popup at the beginning.
