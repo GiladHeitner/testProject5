@@ -147,23 +147,31 @@ def build_filter_complex(
         is_reddit_card = popup.path.name.lower() == "reddit_card.png"
 
         if is_reddit_card:
-            # Slowly grow the reddit card while keeping its center fixed.
+            # Slowly grow the reddit card from `start_scale` up to its full
+            # `popup.width` size by the end of its visible window. Center stays
+            # locked to the same point the static layout would have used.
             try:
                 from PIL import Image as _Image
                 with _Image.open(popup.path) as _im:
                     iw_in, ih_in = _im.size
             except Exception:
                 iw_in, ih_in = popup.width, popup.width
-            initial_h = popup.width * ih_in / max(1, iw_in)
+            full_h = popup.width * ih_in / max(1, iw_in)
             cx = popup.x + popup.width / 2.0
-            cy = popup.y + initial_h / 2.0
-            grow_rate = 0.04
+            cy = popup.y + full_h / 2.0
+            start_scale = 0.70
             start = popup.start_sec
-            growth = f"(1+{grow_rate}*max(0\\,t-{start:.3f}))"
+            duration = max(0.2, popup.end_sec - popup.start_sec)
+            # Linearly grow from start_scale -> 1.0 across the visible window,
+            # clamping at 1.0 in case popup overshoots end_sec.
+            growth = (
+                f"({start_scale}+(1-{start_scale})*"
+                f"min(1\\,max(0\\,(t-{start:.3f})/{duration:.3f})))"
+            )
             scale_part = (
                 f"scale=eval=frame:"
                 f"w='{popup.width}*{growth}':"
-                f"h='{int(round(initial_h))}*{growth}',"
+                f"h='{int(round(full_h))}*{growth}',"
             )
             overlay_x = f"({cx:.2f}-w/2)"
             overlay_y = f"({cy:.2f}-h/2)"
