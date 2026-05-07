@@ -350,13 +350,37 @@ INDEX_HTML = r"""<!doctype html>
 
   .progress { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
-  .progress .row { display: flex; align-items: center; justify-content: space-between; }
-  .progress .bar { position: relative; height: 8px; background: var(--panel-3); border-radius: 999px; overflow: hidden; }
+  .progress .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .progress .bar { position: relative; height: 10px; background: var(--panel-3);
+    border-radius: 999px; overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
   .progress .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    transition: width 0.35s ease; }
-  .progress .lbl { font-size: 12px; color: var(--muted); }
+    transition: width 0.35s ease, box-shadow 0.4s ease;
+    box-shadow: 0 0 8px -1px var(--accent); }
+  .progress .fill::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg,
+      transparent 0%, rgba(255,255,255,0.0) 30%,
+      rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.0) 70%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite linear;
+    pointer-events: none;
+  }
+  .progress .fill.full { box-shadow: 0 0 14px var(--accent); }
+  .progress .fill.full::after { animation: none; }
+  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+  .progress .lbl { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .progress .val { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+  .tier-badge { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px;
+    border: 1px solid rgba(124,92,255,0.4);
+    background: rgba(124,92,255,0.12); color: #cfc6ff; }
+  .tier-badge.t1 { border-color: #6b7280; background: rgba(120,128,140,0.15); color: #c8cfdb; }
+  .tier-badge.t2 { border-color: #4caee5; background: rgba(76,174,229,0.15); color: #cfeaff; }
+  .tier-badge.t3 { border-color: #b06bff; background: rgba(176,107,255,0.18); color: #ead8ff; }
+  .tier-badge.t4 { border-color: #50e3c2; background: rgba(80,227,194,0.18); color: #cdf8ee; }
+  .tier-badge.t5 { border-color: #ffd166; background: rgba(255,209,102,0.18); color: #fff0c8; }
   .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
     padding: 14px 16px; position: relative; overflow: hidden; }
   .stat::before { content: ""; position: absolute; inset: 0; background:
@@ -542,7 +566,10 @@ INDEX_HTML = r"""<!doctype html>
     <!-- Generic step sub-progress (TTS chunks, popup fetches, etc.) -->
     <section class="progress" id="subProgress" style="display:none;">
       <div class="row">
-        <span class="lbl" id="subLabel">Working…</span>
+        <span class="lbl">
+          <span class="tier-badge t1" id="subTier">starting</span>
+          <span id="subLabel">Working…</span>
+        </span>
         <span class="val" id="subStats">0%</span>
       </div>
       <div class="bar"><div class="fill" id="subFill"></div></div>
@@ -755,8 +782,13 @@ INDEX_HTML = r"""<!doctype html>
     $("renderStats").textContent = "waiting…";
     $("subProgress").style.display = "none";
     $("subFill").style.width = "0%";
+    $("subFill").classList.remove("full");
     $("subStats").textContent = "0%";
     $("subLabel").textContent = "Working…";
+    const tierEl = $("subTier");
+    tierEl.classList.remove("t1","t2","t3","t4","t5");
+    tierEl.classList.add("t1");
+    tierEl.textContent = "starting";
   }
   function setStep(n) {
     stepEls().forEach(el => {
@@ -822,10 +854,20 @@ INDEX_HTML = r"""<!doctype html>
       $("subProgress").style.display = "flex";
       const pctM = line.match(/(\d+)%\s*\(/);
       const subM = line.match(/\((\d+)\/(\d+)\)\s+(.+)$/);
+      const fillEl = $("subFill");
       if (pctM) {
         const pct = Math.min(100, parseInt(pctM[1], 10));
-        $("subFill").style.width = pct + "%";
+        fillEl.style.width = pct + "%";
         $("subStats").textContent = pct + "%";
+        if (pct >= 100) fillEl.classList.add("full");
+        else fillEl.classList.remove("full");
+        const tierEl = $("subTier");
+        tierEl.classList.remove("t1","t2","t3","t4","t5");
+        if (pct < 20)      { tierEl.classList.add("t1"); tierEl.textContent = "starting";    }
+        else if (pct < 50) { tierEl.classList.add("t2"); tierEl.textContent = "in progress"; }
+        else if (pct < 80) { tierEl.classList.add("t3"); tierEl.textContent = "halfway";     }
+        else if (pct < 100){ tierEl.classList.add("t4"); tierEl.textContent = "almost there";}
+        else               { tierEl.classList.add("t5"); tierEl.textContent = "done";        }
       }
       if (subM) $("subLabel").textContent = subM[3];
       return;
