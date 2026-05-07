@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from openai import OpenAI
 
+from .runner import print_progress
 from .scene_assets import Scene, _fetch_scene_image, _with_retries
 from .types import PopupImage
 
@@ -215,8 +216,10 @@ def build_keyword_popups(
     width = popup_width
     x = (1080 - width) // 2
 
+    total_kw = len(spaced)
     for idx, (kw, s, e) in enumerate(spaced, start=1):
         scene = Scene(index=idx, text=kw["phrase"], query=kw["query"], word_count=1)
+        print_progress(idx, total_kw, f"Fetching popup image: {kw['phrase']!r}")
         print(f"[kw {idx:02d}] {kw['phrase']!r} -> query={kw['query']!r} ({s:.2f}-{e:.2f}s)")
         path = _fetch_scene_image(
             scene=scene,
