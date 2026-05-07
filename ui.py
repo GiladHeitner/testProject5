@@ -351,12 +351,12 @@ INDEX_HTML = r"""<!doctype html>
   .progress { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
   .progress .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .progress .bar { position: relative; height: 10px; background: var(--panel-3);
+  .progress .bar { position: relative; height: 12px; background: var(--panel-3);
     border-radius: 999px; overflow: hidden;
     box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
   .progress .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    transition: width 0.35s ease, box-shadow 0.4s ease;
+    transition: width 0.35s ease, box-shadow 0.4s ease, background 0.6s ease;
     box-shadow: 0 0 8px -1px var(--accent); }
   .progress .fill::after {
     content: ""; position: absolute; inset: 0;
@@ -372,15 +372,60 @@ INDEX_HTML = r"""<!doctype html>
   @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   .progress .lbl { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .progress .val { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
-  .tier-badge { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
-    padding: 2px 8px; border-radius: 999px;
-    border: 1px solid rgba(124,92,255,0.4);
-    background: rgba(124,92,255,0.12); color: #cfc6ff; }
-  .tier-badge.t1 { border-color: #6b7280; background: rgba(120,128,140,0.15); color: #c8cfdb; }
-  .tier-badge.t2 { border-color: #4caee5; background: rgba(76,174,229,0.15); color: #cfeaff; }
-  .tier-badge.t3 { border-color: #b06bff; background: rgba(176,107,255,0.18); color: #ead8ff; }
-  .tier-badge.t4 { border-color: #50e3c2; background: rgba(80,227,194,0.18); color: #cdf8ee; }
-  .tier-badge.t5 { border-color: #ffd166; background: rgba(255,209,102,0.18); color: #fff0c8; }
+
+  /* Elemental tier badges (cycle as progress climbs) */
+  .tier-badge { font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+    padding: 3px 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid transparent; transition: all 0.4s ease;
+    text-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+  .tier-badge .icon { display: inline-block; transform-origin: center; }
+
+  /* T1: FROST */
+  .tier-badge.t1 { border-color: #7fc6ff; background: linear-gradient(135deg, rgba(60,140,220,0.20), rgba(120,200,255,0.20)); color: #e6f2ff; box-shadow: 0 0 10px rgba(127,198,255,0.25) inset; }
+  .tier-badge.t1 .icon { animation: drift 3.5s ease-in-out infinite; }
+  .progress .fill.t1 { background: linear-gradient(90deg, #5fa8ff, #b6ddff); box-shadow: 0 0 10px rgba(127,198,255,0.55); }
+
+  /* T2: TIDE */
+  .tier-badge.t2 { border-color: #4cc9f0; background: linear-gradient(135deg, rgba(34,177,200,0.22), rgba(76,201,240,0.22)); color: #d4f4ff; box-shadow: 0 0 12px rgba(76,201,240,0.28) inset; }
+  .tier-badge.t2 .icon { animation: bob 1.8s ease-in-out infinite; }
+  .progress .fill.t2 { background: linear-gradient(90deg, #2ec4b6, #4cc9f0); box-shadow: 0 0 14px rgba(76,201,240,0.55); }
+
+  /* T3: VERDANT */
+  .tier-badge.t3 { border-color: #6bd66f; background: linear-gradient(135deg, rgba(76,175,80,0.24), rgba(141,210,99,0.24)); color: #e6fbe1; box-shadow: 0 0 12px rgba(141,210,99,0.28) inset; }
+  .tier-badge.t3 .icon { animation: sway 2.4s ease-in-out infinite; }
+  .progress .fill.t3 { background: linear-gradient(90deg, #34d399, #84e870); box-shadow: 0 0 14px rgba(132,232,112,0.55); }
+
+  /* T4: STORM */
+  .tier-badge.t4 { border-color: #b06bff; background: linear-gradient(135deg, rgba(124,92,255,0.26), rgba(255,209,102,0.20)); color: #f1e9ff; box-shadow: 0 0 14px rgba(176,107,255,0.32) inset; }
+  .tier-badge.t4 .icon { animation: zap 0.9s steps(2) infinite; }
+  .progress .fill.t4 { background: linear-gradient(90deg, #7c5cff, #ffd166); box-shadow: 0 0 18px rgba(176,107,255,0.65); }
+
+  /* T5: INFERNO */
+  .tier-badge.t5 { border-color: #ff6b35; background: linear-gradient(135deg, rgba(255,107,53,0.30), rgba(247,37,133,0.22)); color: #ffe6dc; box-shadow: 0 0 16px rgba(255,107,53,0.36) inset; }
+  .tier-badge.t5 .icon { animation: flicker 0.7s ease-in-out infinite alternate; }
+  .progress .fill.t5 { background: linear-gradient(90deg, #ff6b35, #f72585); box-shadow: 0 0 22px rgba(255,107,53,0.75); }
+
+  /* T6: ASCENDED (100%) */
+  .tier-badge.t6 { border-color: #ffd166; color: #fff8d6;
+    background: linear-gradient(135deg, #ffd166, #ff8c00, #f72585, #7c5cff, #4cc9f0);
+    background-size: 300% 100%; animation: rainbow 4s linear infinite;
+    box-shadow: 0 0 18px rgba(255,209,102,0.6) inset, 0 0 22px rgba(255,209,102,0.4); }
+  .tier-badge.t6 .icon { animation: spin 3s linear infinite; }
+  .progress .fill.t6 {
+    background: linear-gradient(90deg, #ffd166, #ff8c00, #f72585, #7c5cff, #4cc9f0, #ffd166);
+    background-size: 300% 100%; animation: rainbow 3.5s linear infinite;
+    box-shadow: 0 0 28px rgba(255,209,102,0.85);
+  }
+
+  @keyframes drift   { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px) rotate(6deg); } }
+  @keyframes bob     { 0%,100% { transform: translateY(0); }  50% { transform: translateY(-2px); } }
+  @keyframes sway    { 0%,100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+  @keyframes zap     { 0%,100% { transform: scale(1); filter: brightness(1); }
+                       50%      { transform: scale(1.25); filter: brightness(1.6); } }
+  @keyframes flicker { 0% { transform: scale(1) translateY(0); filter: brightness(1); }
+                       100%{ transform: scale(1.18) translateY(-1px); filter: brightness(1.45); } }
+  @keyframes spin    { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+  @keyframes rainbow { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
   .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
     padding: 14px 16px; position: relative; overflow: hidden; }
   .stat::before { content: ""; position: absolute; inset: 0; background:
@@ -567,7 +612,7 @@ INDEX_HTML = r"""<!doctype html>
     <section class="progress" id="subProgress" style="display:none;">
       <div class="row">
         <span class="lbl">
-          <span class="tier-badge t1" id="subTier">starting</span>
+          <span class="tier-badge t1" id="subTier"><span class="icon" id="subTierIcon">❄️</span><span id="subTierName">Frost</span></span>
           <span id="subLabel">Working…</span>
         </span>
         <span class="val" id="subStats">0%</span>
@@ -781,14 +826,16 @@ INDEX_HTML = r"""<!doctype html>
     $("renderFill").style.width = "0%";
     $("renderStats").textContent = "waiting…";
     $("subProgress").style.display = "none";
-    $("subFill").style.width = "0%";
-    $("subFill").classList.remove("full");
+    const subFillReset = $("subFill");
+    subFillReset.style.width = "0%";
+    ["t1","t2","t3","t4","t5","t6","full"].forEach(c => subFillReset.classList.remove(c));
     $("subStats").textContent = "0%";
     $("subLabel").textContent = "Working…";
     const tierEl = $("subTier");
-    tierEl.classList.remove("t1","t2","t3","t4","t5");
+    ["t1","t2","t3","t4","t5","t6"].forEach(c => tierEl.classList.remove(c));
     tierEl.classList.add("t1");
-    tierEl.textContent = "starting";
+    $("subTierIcon").textContent = "\u2744\uFE0F";
+    $("subTierName").textContent = "Frost";
   }
   function setStep(n) {
     stepEls().forEach(el => {
@@ -855,19 +902,38 @@ INDEX_HTML = r"""<!doctype html>
       const pctM = line.match(/(\d+)%\s*\(/);
       const subM = line.match(/\((\d+)\/(\d+)\)\s+(.+)$/);
       const fillEl = $("subFill");
+      const tierEl = $("subTier");
+      const tierIcon = $("subTierIcon");
+      const tierName = $("subTierName");
+      const TIERS = [
+        { cls: "t1", icon: "\u2744\uFE0F", name: "Frost"    },
+        { cls: "t2", icon: "\uD83D\uDCA7", name: "Tide"     },
+        { cls: "t3", icon: "\uD83C\uDF31", name: "Verdant"  },
+        { cls: "t4", icon: "\u26A1",       name: "Storm"    },
+        { cls: "t5", icon: "\uD83D\uDD25", name: "Inferno"  },
+        { cls: "t6", icon: "\u2728",       name: "Ascended" },
+      ];
       if (pctM) {
         const pct = Math.min(100, parseInt(pctM[1], 10));
         fillEl.style.width = pct + "%";
         $("subStats").textContent = pct + "%";
         if (pct >= 100) fillEl.classList.add("full");
         else fillEl.classList.remove("full");
-        const tierEl = $("subTier");
-        tierEl.classList.remove("t1","t2","t3","t4","t5");
-        if (pct < 20)      { tierEl.classList.add("t1"); tierEl.textContent = "starting";    }
-        else if (pct < 50) { tierEl.classList.add("t2"); tierEl.textContent = "in progress"; }
-        else if (pct < 80) { tierEl.classList.add("t3"); tierEl.textContent = "halfway";     }
-        else if (pct < 100){ tierEl.classList.add("t4"); tierEl.textContent = "almost there";}
-        else               { tierEl.classList.add("t5"); tierEl.textContent = "done";        }
+        let tIdx = 0;
+        if (pct >= 100)      tIdx = 5;
+        else if (pct >= 80)  tIdx = 4;
+        else if (pct >= 60)  tIdx = 3;
+        else if (pct >= 40)  tIdx = 2;
+        else if (pct >= 20)  tIdx = 1;
+        const tier = TIERS[tIdx];
+        ["t1","t2","t3","t4","t5","t6"].forEach(c => {
+          tierEl.classList.remove(c);
+          fillEl.classList.remove(c);
+        });
+        tierEl.classList.add(tier.cls);
+        fillEl.classList.add(tier.cls);
+        tierIcon.textContent = tier.icon;
+        tierName.textContent = tier.name;
       }
       if (subM) $("subLabel").textContent = subM[3];
       return;
