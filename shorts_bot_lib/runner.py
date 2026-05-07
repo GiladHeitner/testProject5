@@ -102,6 +102,21 @@ def print_progress(step: int, total: int, label: str) -> None:
     print(f"[{bar}] {percent:3d}% ({step}/{total}) {label}")
 
 
+def print_sub_progress(step: int, total: int, label: str) -> None:
+    """Sub-progress within a top-level step.
+
+    Uses a `[sub]` prefix so log parsers (e.g. the UI) can render it as a
+    sub-bar without confusing it with the main `print_progress` step counter.
+    """
+    width = 24
+    total = max(1, int(total))
+    step = max(0, min(int(step), total))
+    filled = int(width * step / total)
+    bar = "#" * filled + "-" * (width - filled)
+    percent = int(100 * step / total)
+    print(f"[sub] [{bar}] {percent:3d}% ({step}/{total}) {label}", flush=True)
+
+
 def pick_random_file(folder: Path, extensions: List[str]) -> Path:
     items = [
         p

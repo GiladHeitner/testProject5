@@ -539,6 +539,15 @@ INDEX_HTML = r"""<!doctype html>
       <div class="bar"><div class="fill" id="renderFill"></div></div>
     </section>
 
+    <!-- Generic step sub-progress (TTS chunks, popup fetches, etc.) -->
+    <section class="progress" id="subProgress" style="display:none;">
+      <div class="row">
+        <span class="lbl" id="subLabel">Working…</span>
+        <span class="val" id="subStats">0%</span>
+      </div>
+      <div class="bar"><div class="fill" id="subFill"></div></div>
+    </section>
+
     <!-- Prompt bar -->
     <div class="prompt" id="promptBar" style="display:none;">
       <div class="left">
@@ -744,6 +753,10 @@ INDEX_HTML = r"""<!doctype html>
     $("renderProgress").style.display = "none";
     $("renderFill").style.width = "0%";
     $("renderStats").textContent = "waiting…";
+    $("subProgress").style.display = "none";
+    $("subFill").style.width = "0%";
+    $("subStats").textContent = "0%";
+    $("subLabel").textContent = "Working…";
   }
   function setStep(n) {
     stepEls().forEach(el => {
@@ -802,6 +815,21 @@ INDEX_HTML = r"""<!doctype html>
     // Prompt bar
     if (/Use this script\? \(Y\/N\)/.test(line)) showPrompt("Use this script?");
     if (/Regenerating/.test(line)) hidePrompt();
+
+    // Sub-progress (e.g. "[sub] [###----] 25% (3/12) Fetching popup image: 'pickles'").
+    // Handle BEFORE main step tracker so its (N/M) doesn't overwrite the step.
+    if (line.startsWith("[sub] ")) {
+      $("subProgress").style.display = "flex";
+      const pctM = line.match(/(\d+)%\s*\(/);
+      const subM = line.match(/\((\d+)\/(\d+)\)\s+(.+)$/);
+      if (pctM) {
+        const pct = Math.min(100, parseInt(pctM[1], 10));
+        $("subFill").style.width = pct + "%";
+        $("subStats").textContent = pct + "%";
+      }
+      if (subM) $("subLabel").textContent = subM[3];
+      return;
+    }
 
     // Pipeline step tracker (matches shorts_bot's print_progress output)
     // e.g. "[####----] 33% (2/6) Creating voiceover"

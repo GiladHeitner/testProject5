@@ -32,7 +32,7 @@ from .images import (
     _gemini_image_models,
 )
 from .image_judge import judge_image
-from .runner import print_progress
+from .runner import print_sub_progress
 from .types import PopupImage
 
 
@@ -478,7 +478,7 @@ def build_scene_popups(
 
     total_scenes = len(scenes)
     for idx, (scene, (start, end)) in enumerate(zip(scenes, windows), start=1):
-        print_progress(idx, total_scenes, f"Fetching scene image: {scene.query!r}")
+        print_sub_progress(idx, total_scenes, f"Fetching scene image: {scene.query!r}")
         print(f"[{scene.index:02d}] query={scene.query!r}")
         path = _fetch_scene_image(
             scene=scene,
