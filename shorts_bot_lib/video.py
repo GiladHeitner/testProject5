@@ -139,57 +139,16 @@ def build_filter_complex(
     else:
         base_video = "v0"
 
-    overlay_specs: List[tuple[str, str, float, float]] = []
     for i, popup in enumerate(popups, start=0):
-        is_reddit_card = popup.path.name.lower() == "reddit_card.png"
-        eff_start = popup.start_sec
-        eff_end = popup.end_sec
-        if is_reddit_card:
-            # Hard-cap how long the card sits on screen so the grow animation
-            # feels snappy rather than glued to the entire spoken hook.
-            eff_end = min(eff_end, eff_start + 2.5)
-        popup_len = max(0.2, eff_end - eff_start)
+        popup_len = max(0.2, popup.end_sec - popup.start_sec)
         fade_dur = min(0.25, popup_len * 0.35)
-        fade_out_start = max(eff_start, eff_end - fade_dur)
-
-        if is_reddit_card:
-            # Slowly grow the reddit card from `start_scale` up to its full
-            # `popup.width` size while keeping its center fixed. We use the
-            # `iw*expr` form because that's the only scale-eval-frame pattern
-            # ffmpeg reliably re-evaluates per frame in our env.
-            try:
-                from PIL import Image as _Image
-                with _Image.open(popup.path) as _im:
-                    iw_in, ih_in = _im.size
-            except Exception:
-                iw_in, ih_in = popup.width, popup.width
-            full_h = popup.width * ih_in / max(1, iw_in)
-            cx = popup.x + popup.width / 2.0
-            cy = popup.y + full_h / 2.0
-            start_scale = 0.70
-            delta_scale = 1.0 - start_scale
-            grow_dur = max(0.4, popup_len)
-            ratio = popup.width / float(max(1, iw_in))
-            growth = (
-                f"({start_scale}+{delta_scale}"
-                f"*min(1,max(0,(t-{eff_start:.3f})/{grow_dur:.3f})))"
-            )
-            scale_part = (
-                f"scale=eval=frame:"
-                f"w='iw*{ratio:.6f}*{growth}':"
-                f"h='ih*{ratio:.6f}*{growth}',"
-            )
-            overlay_x = f"({cx:.2f}-w/2)"
-            overlay_y = f"({cy:.2f}-h/2)"
-        else:
-            scale_part = (
-                f"scale={popup.width}:-1,"
-                if (popup.is_emoji or popup.preserve_aspect)
-                else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
-            )
-            overlay_x = f"{popup.x}"
-            overlay_y = f"{popup.y}"
-        overlay_specs.append((overlay_x, overlay_y, eff_start, eff_end))
+        fade_out_start = max(popup.start_sec, popup.end_sec - fade_dur)
+        is_reddit_card = popup.path.name.lower() == "reddit_card.png"
+        scale_part = (
+            f"scale={popup.width}:-1,"
+            if (popup.is_emoji or popup.preserve_aspect or is_reddit_card)
+            else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
+        )
         chains.append(
             (
                 f"[{i + 2}:v]"
@@ -210,11 +169,10 @@ def build_filter_complex(
     current = base_video
     for i, popup in enumerate(popups, start=0):
         next_label = f"v{i + 1}"
-        ox, oy, ovl_start, ovl_end = overlay_specs[i]
         chains.append(
             f"[{current}][img{i}]overlay="
-            f"x='{ox}':y='{oy}':"
-            f"enable='between(t,{ovl_start:.3f},{ovl_end:.3f})'"
+            f"x={popup.x}:y={popup.y}:"
+            f"enable='between(t,{popup.start_sec:.3f},{popup.end_sec:.3f})'"
             f"[{next_label}]"
         )
         current = next_label
