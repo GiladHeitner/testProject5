@@ -154,7 +154,9 @@ def build_filter_complex(
 
         if is_reddit_card:
             # Slowly grow the reddit card from `start_scale` up to its full
-            # `popup.width` size while keeping its center fixed.
+            # `popup.width` size while keeping its center fixed. We use the
+            # `iw*expr` form because that's the only scale-eval-frame pattern
+            # ffmpeg reliably re-evaluates per frame in our env.
             try:
                 from PIL import Image as _Image
                 with _Image.open(popup.path) as _im:
@@ -165,14 +167,17 @@ def build_filter_complex(
             cx = popup.x + popup.width / 2.0
             cy = popup.y + full_h / 2.0
             start_scale = 0.70
-            grow_dur = max(0.4, popup_len)  # finish growing by end of window
+            delta_scale = 1.0 - start_scale
+            grow_dur = max(0.4, popup_len)
+            ratio = popup.width / float(max(1, iw_in))
             growth = (
-                f"({start_scale}+(1-{start_scale})"
+                f"({start_scale}+{delta_scale}"
                 f"*min(1,max(0,(t-{eff_start:.3f})/{grow_dur:.3f})))"
             )
             scale_part = (
-                f"scale=w='{popup.width}*{growth}':"
-                f"h='{int(round(full_h))}*{growth}':eval=frame,"
+                f"scale=eval=frame:"
+                f"w='iw*{ratio:.6f}*{growth}':"
+                f"h='ih*{ratio:.6f}*{growth}',"
             )
             overlay_x = f"({cx:.2f}-w/2)"
             overlay_y = f"({cy:.2f}-h/2)"
