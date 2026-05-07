@@ -107,6 +107,7 @@ def _build_cmd(payload: dict[str, Any]) -> list[str]:
     add_flag("quick_test", "--quick-test")
     add_flag("no_description", "--no-description")
     add_flag("upload", "--upload")
+    add_flag("upload_only", "--upload-only")
     return cmd
 
 
@@ -549,6 +550,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="right">
       <button class="btn ghost" id="refreshBtn">Refresh</button>
       <button class="btn danger" id="stopBtn" disabled>Stop</button>
+      <button class="btn" id="uploadExistingBtn" title="Upload the most recent output/short.mp4 to YouTube">Upload existing</button>
       <button class="btn primary" id="runBtn">Run</button>
     </div>
   </div>
@@ -1006,6 +1008,24 @@ INDEX_HTML = r"""<!doctype html>
   });
   stopBtn.addEventListener("click", async () => { await fetch("/api/stop", {method: "POST"}); });
   $("refreshBtn").addEventListener("click", refreshPreview);
+  $("uploadExistingBtn").addEventListener("click", async () => {
+    if (!confirm("Upload the most recent output/short.mp4 to YouTube?")) return;
+    logEl.innerHTML = ""; logInline.innerHTML = ""; logCount.textContent = "0 lines";
+    resetSteps();
+    setStatus("Uploading…", "run");
+    const payload = collect();
+    payload.upload = true;
+    payload.upload_only = true;
+    const res = await fetch("/api/run", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload)});
+    const data = await res.json();
+    if (!data.ok) { setStatus("Error", "err"); appendLog("Error: " + data.error); return; }
+    cmdDisplay.textContent = data.cmd;
+    runBtn.disabled = true; stopBtn.disabled = false;
+    setStatus("Uploading pid " + data.pid, "run");
+    $("statElapsedSub").textContent = "Upload time";
+    startElapsed();
+  });
 
   const es = new EventSource("/api/stream");
   es.onmessage = (ev) => {

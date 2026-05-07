@@ -153,6 +153,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Disable the local reaction-image fallback popups when scene "
              "assets and keyword popups produce nothing.",
     )
+    parser.add_argument(
+        "--upload-only",
+        action="store_true",
+        help="Skip every generation step and only upload the existing "
+             "output/short.mp4 to YouTube using output/script.txt for "
+             "metadata. Implies --upload.",
+    )
     return parser
 
 
@@ -173,6 +180,59 @@ def _confirm_script_interactive(script: str) -> bool:
         return True
     print("Regenerating...\n")
     return False
+
+
+def _run_upload_only(
+    args: argparse.Namespace,
+    client: OpenAI | None,
+    output_dir: Path,
+) -> None:
+    """Upload an already-rendered output/short.mp4 to YouTube."""
+    output_video = output_dir / "short.mp4"
+    if not output_video.exists():
+        raise RuntimeError(
+            f"Cannot upload: {output_video} not found. Run a normal generation first."
+        )
+    script_file = output_dir / "script.txt"
+    script = script_file.read_text(encoding="utf-8").strip() if script_file.exists() else ""
+
+    print_progress(1, 2, "Generating metadata")
+    title = ""
+    description = ""
+    if client is not None and script:
+        title, description = generate_metadata(
+            client, script, include_description=not args.no_description
+        )
+    if not title:
+        hook = script.split(".")[0].strip() if script else ""
+        title = (hook[:82] + "...") if len(hook) > 85 else (hook or "Crazy Story You Won't Believe")
+    if "#shorts" not in title.lower():
+        title = f"{title} #Shorts"
+    if description and "#shorts" not in description.lower():
+        description = f"{description}\n\n#Shorts"
+    tags = ["shorts", "storytime", "school story", "crazy story", "viral short"]
+    print(f"Title: {title}")
+    print(f"Description: {description if description else '(empty)'}")
+
+    print_progress(2, 2, "Uploading to YouTube")
+    video_url = upload_to_youtube(
+        video_file=output_video,
+        title=title,
+        description=description,
+        tags=tags,
+        privacy=args.privacy,
+        thumbnail_file=None,
+    )
+    print(f"Uploaded: {video_url}")
+    print("Note: Shorts can take 1\u20135 min to process before appearing in the feed.")
+    if script:
+        try:
+            from googleapiclient.discovery import build as _build
+            _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
+            video_id = video_url.split("v=")[-1]
+            post_pinned_comment(_yt, video_id, script)
+        except Exception as exc:
+            print(f"Could not post pinned comment: {exc}")
 
 
 def _run_images_only(
@@ -275,7 +335,10 @@ def main() -> None:
     if args.video_only and args.generate_images:
         raise RuntimeError("--video-only cannot be combined with --generate-images.")
 
-    needs_openai = not args.video_only or args.generate_images
+    if args.upload_only:
+        args.upload = True
+
+    needs_openai = (not args.video_only or args.generate_images) and not args.upload_only
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if needs_openai and not api_key:
@@ -299,6 +362,10 @@ def main() -> None:
 
     if args.images_only:
         _run_images_only(args, client, gemini_key, output_dir)
+        return
+
+    if args.upload_only:
+        _run_upload_only(args, client, output_dir)
         return
 
     gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
