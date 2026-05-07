@@ -139,16 +139,43 @@ def build_filter_complex(
     else:
         base_video = "v0"
 
+    overlay_specs: List[tuple[str, str]] = []
     for i, popup in enumerate(popups, start=0):
         popup_len = max(0.2, popup.end_sec - popup.start_sec)
         fade_dur = min(0.25, popup_len * 0.35)
         fade_out_start = max(popup.start_sec, popup.end_sec - fade_dur)
         is_reddit_card = popup.path.name.lower() == "reddit_card.png"
-        scale_part = (
-            f"scale={popup.width}:-1,"
-            if (popup.is_emoji or popup.preserve_aspect or is_reddit_card)
-            else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
-        )
+
+        if is_reddit_card:
+            # Slowly grow the reddit card while keeping its center fixed.
+            try:
+                from PIL import Image as _Image
+                with _Image.open(popup.path) as _im:
+                    iw_in, ih_in = _im.size
+            except Exception:
+                iw_in, ih_in = popup.width, popup.width
+            initial_h = popup.width * ih_in / max(1, iw_in)
+            cx = popup.x + popup.width / 2.0
+            cy = popup.y + initial_h / 2.0
+            grow_rate = 0.04
+            start = popup.start_sec
+            growth = f"(1+{grow_rate}*max(0\\,t-{start:.3f}))"
+            scale_part = (
+                f"scale=eval=frame:"
+                f"w='{popup.width}*{growth}':"
+                f"h='{int(round(initial_h))}*{growth}',"
+            )
+            overlay_x = f"({cx:.2f}-w/2)"
+            overlay_y = f"({cy:.2f}-h/2)"
+        else:
+            scale_part = (
+                f"scale={popup.width}:-1,"
+                if (popup.is_emoji or popup.preserve_aspect)
+                else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
+            )
+            overlay_x = f"{popup.x}"
+            overlay_y = f"{popup.y}"
+        overlay_specs.append((overlay_x, overlay_y))
         chains.append(
             (
                 f"[{i + 2}:v]"
@@ -169,9 +196,10 @@ def build_filter_complex(
     current = base_video
     for i, popup in enumerate(popups, start=0):
         next_label = f"v{i + 1}"
+        ox, oy = overlay_specs[i]
         chains.append(
             f"[{current}][img{i}]overlay="
-            f"x={popup.x}:y={popup.y}:"
+            f"x='{ox}':y='{oy}':"
             f"enable='between(t,{popup.start_sec:.3f},{popup.end_sec:.3f})'"
             f"[{next_label}]"
         )
