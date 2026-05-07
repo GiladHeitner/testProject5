@@ -111,6 +111,9 @@ jobs:
       - name: Generate and upload short
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./run.sh --topic "$TOPIC" --dynamic-speed
 
       - name: Save used-topic state
