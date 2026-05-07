@@ -70,7 +70,7 @@ fi
 
 WORDS="${WORDS:-100}"
 
-upload_args=(--upload)
+upload_args=(--upload --no-description)
 forward_args=()
 is_quick_test=0
 topic_arg=()
