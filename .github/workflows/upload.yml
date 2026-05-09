@@ -114,7 +114,7 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./run.sh --topic "$TOPIC" --dynamic-speed
+        run: ./run.sh --topic "$TOPIC" --dynamic-speed --no-reddit-card
 
       - name: Save used-topic state
         run: |

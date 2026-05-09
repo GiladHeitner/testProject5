@@ -49,6 +49,10 @@ from shorts_bot_lib.transcribe import (
     transcribe_audio_to_srt,
 )
 from shorts_bot_lib.reddit_card import RedditCardSpec, render_reddit_card_png
+
+
+class _SkipRedditCard(Exception):
+    """Sentinel used to bail out of the reddit-card block when disabled."""
 from shorts_bot_lib.types import PopupImage, Word
 from shorts_bot_lib.video import compose_video, pick_sfx_for_popups
 from shorts_bot_lib.voiceover import (
@@ -159,6 +163,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Skip every generation step and only upload the existing "
              "output/short.mp4 to YouTube using output/script.txt for "
              "metadata. Implies --upload.",
+    )
+    parser.add_argument(
+        "--no-reddit-card",
+        action="store_true",
+        help="Skip the Reddit-style hook card overlay. Subtitles and other "
+             "popups will play normally over the hook window.",
     )
     return parser
 
@@ -548,6 +558,9 @@ def main() -> None:
 
     # Add a Reddit-style hook card popup at the beginning.
     try:
+        if args.no_reddit_card:
+            print("Reddit hook card disabled (--no-reddit-card); keeping subtitles and popups as-is.")
+            raise _SkipRedditCard()
         # Title = the script's first paragraph (before the first blank line).
         # Normalize line endings so CRLF files still split correctly.
         normalized_script = script.replace("\r\n", "\n").replace("\r", "\n")
@@ -671,6 +684,8 @@ def main() -> None:
             except Exception as exc:
                 print(f"Subtitle suppression failed: {exc}")
         popups.sort(key=lambda p: p.start_sec)
+    except _SkipRedditCard:
+        pass
     except Exception as exc:
         print(f"Reddit hook card generation failed: {exc}")
 
