@@ -143,10 +143,13 @@ def build_filter_complex(
         popup_len = max(0.2, popup.end_sec - popup.start_sec)
         fade_dur = min(0.25, popup_len * 0.35)
         fade_out_start = max(popup.start_sec, popup.end_sec - fade_dur)
-        is_reddit_card = popup.path.name.lower() == "reddit_card.png"
+        # Reddit card feature disabled; preserve aspect ratio still works via
+        # PopupImage.preserve_aspect / is_emoji. The dedicated reddit_card.png
+        # branch is left commented out for an easy re-enable.
+        # is_reddit_card = popup.path.name.lower() == "reddit_card.png"
         scale_part = (
             f"scale={popup.width}:-1,"
-            if (popup.is_emoji or popup.preserve_aspect or is_reddit_card)
+            if (popup.is_emoji or popup.preserve_aspect)
             else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
         )
         chains.append(

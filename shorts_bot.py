@@ -42,18 +42,19 @@ from shorts_bot_lib.script_ai import (
     generate_metadata,
     generate_script,
 )
-from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments, write_karaoke_block_ass
-from shorts_bot_lib.text import get_highlight_timestamps
+from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
+from shorts_bot_lib.text import get_highlight_timestamps, text_keywords
 from shorts_bot_lib.transcribe import (
     get_whisper_word_timestamps,
     transcribe_audio_to_srt,
 )
-from shorts_bot_lib.reddit_card import RedditCardSpec, render_reddit_card_png
+# Reddit card feature disabled; keep import commented for easy re-enable.
+# from shorts_bot_lib.reddit_card import RedditCardSpec, render_reddit_card_png
+from shorts_bot_lib.types import PopupImage
 
 
-class _SkipRedditCard(Exception):
-    """Sentinel used to bail out of the reddit-card block when disabled."""
-from shorts_bot_lib.types import PopupImage, Word
+class _SkipFirstSentencePopup(Exception):
+    """Sentinel used to bail out of the first-sentence guarantee when disabled."""
 from shorts_bot_lib.video import compose_video, pick_sfx_for_popups
 from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
@@ -167,8 +168,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-reddit-card",
         action="store_true",
-        help="Skip the Reddit-style hook card overlay. Subtitles and other "
-             "popups will play normally over the hook window.",
+        help="Skip the first-sentence guarantee popup. The Reddit hook card "
+             "feature itself is disabled; this flag is kept for backward "
+             "compatibility and now controls only the guaranteed first-sentence popup.",
     )
     return parser
 
@@ -259,17 +261,19 @@ def _run_images_only(
         raise RuntimeError(
             "No script found for --images-only. Provide --script or ensure output/script.txt exists."
         )
-    hook_text = script.split(".")[0].strip()
-    if not hook_text:
-        hook_text = script.strip()
-    if not hook_text:
-        raise RuntimeError("Script is empty; cannot render reddit card.")
-    out_path = render_reddit_card_png(
-        title=hook_text,
-        out_path=output_dir / "reddit_card" / "reddit_card.png",
-        spec=RedditCardSpec(),
-    )
-    print(f"Reddit card saved: {out_path}")
+    # Reddit card rendering disabled. To re-enable, uncomment the block below
+    # and re-add the `reddit_card` import at the top of this file.
+    # hook_text = script.split(".")[0].strip()
+    # if not hook_text:
+    #     hook_text = script.strip()
+    # if not hook_text:
+    #     raise RuntimeError("Script is empty; cannot render reddit card.")
+    # out_path = render_reddit_card_png(
+    #     title=hook_text,
+    #     out_path=output_dir / "reddit_card" / "reddit_card.png",
+    #     spec=RedditCardSpec(),
+    # )
+    # print(f"Reddit card saved: {out_path}")
     print("Done (images-only).")
 
 
@@ -556,39 +560,33 @@ def main() -> None:
     if not popups and not args.no_fallback_popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
-    # Add a Reddit-style hook card popup at the beginning.
+    # Reddit-style hook card is disabled. Original implementation is preserved
+    # below in a commented-out block in case we want to bring it back. The new
+    # behavior only guarantees that one normal popup overlaps the spoken first
+    # sentence; it does not strip other popups or rewrite subtitles.
+    #
+    # try:
+    #     ...render_reddit_card_png(...)...
+    #     popups.insert(0, PopupImage(path=card_path, ..., preserve_aspect=True))
+    #     # drop/trim popups during card window, rebuild karaoke .ass, etc.
+    # except Exception as exc:
+    #     print(f"Reddit hook card generation failed: {exc}")
+
+    # Guarantee at least one normal popup overlaps the spoken first sentence.
+    if args.no_reddit_card:
+        print("First-sentence popup guarantee disabled (--no-reddit-card).")
     try:
         if args.no_reddit_card:
-            print("Reddit hook card disabled (--no-reddit-card); keeping subtitles and popups as-is.")
-            raise _SkipRedditCard()
-        # Title = the script's first paragraph (before the first blank line).
-        # Normalize line endings so CRLF files still split correctly.
+            raise _SkipFirstSentencePopup()
         normalized_script = script.replace("\r\n", "\n").replace("\r", "\n")
         first_block = normalized_script.split("\n\n", 1)[0].strip()
-        # Safety: if there's no blank line, fall back to the first sentence
-        # so we don't put the entire script on the card.
         if not first_block or first_block == normalized_script.strip():
             first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
-        # Extra safety: if title is unreasonably long, take only first sentence.
         if len(first_block.split()) > 20:
             first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
-        hook_text = first_block or script.split(".")[0].strip()
-        if hook_text:
-            card_dir = output_dir / "reddit_card"
-            card_path = render_reddit_card_png(
-                title=hook_text,
-                out_path=card_dir / "reddit_card.png",
-                spec=RedditCardSpec(
-                    awards_dir=(
-                        Path(os.environ.get("REDDIT_AWARDS_DIR", "")).expanduser()
-                        if os.environ.get("REDDIT_AWARDS_DIR", "").strip()
-                        else (project_root / "assets" / "awards" if (project_root / "assets" / "awards").exists() else None)
-                    )
-                ),
-            )
-            card_width = 880
-            # Prefer the actual subtitles.srt timestamps (what gets displayed),
-            # then narration_reference_segments, then in-memory subtitle_segments.
+        first_sentence = first_block or script.split(".")[0].strip()
+
+        if first_sentence:
             srt_word_segments: List[dict] = []
             srt_path = output_dir / "subtitles.srt"
             if srt_path.exists():
@@ -596,98 +594,88 @@ def main() -> None:
                     srt_word_segments = read_srt_segments(srt_path)
                 except Exception as exc:
                     print(f"Could not read {srt_path}: {exc}")
-            win = _find_spoken_window(hook_text, srt_word_segments) if srt_word_segments else None
+            win = _find_spoken_window(first_sentence, srt_word_segments) if srt_word_segments else None
             if win is None and narration_reference_segments:
-                win = _find_spoken_window(hook_text, narration_reference_segments)
+                win = _find_spoken_window(first_sentence, narration_reference_segments)
             if win is None and subtitle_segments:
-                win = _find_spoken_window(hook_text, subtitle_segments)
-            n_words = max(1, len(hook_text.split()))
-            est_dur = n_words * 0.42 + 0.5
-            start_sec = 0.0
+                win = _find_spoken_window(first_sentence, subtitle_segments)
+
+            tail = max(0.0, narration_duration - 0.05)
             if win is not None:
-                end_sec = min(narration_duration - 0.05, float(win[1]))
-                if end_sec <= start_sec:
-                    end_sec = min(narration_duration - 0.05, start_sec + est_dur)
-                print(f"Reddit card window (whisper): {start_sec:.2f}s -> {end_sec:.2f}s for title {hook_text!r}")
+                t0 = max(0.0, float(win[0]))
+                t1 = min(tail, float(win[1]))
             else:
-                end_sec = min(narration_duration - 0.05, est_dur)
-                print(f"Reddit card window (no spoken match, using estimate): {start_sec:.2f}s -> {end_sec:.2f}s")
-            popups.insert(
-                0,
-                PopupImage(
-                    path=card_path,
-                    start_sec=start_sec,
-                    end_sec=end_sec,
-                    x=(1080 - card_width) // 2,
-                    y=470,
-                    width=card_width,
-                    play_sfx=False,
-                    use_fade=True,
-                    preserve_aspect=True,
-                ),
-            )
+                n_words = max(1, len(first_sentence.split()))
+                est_dur = n_words * 0.42 + 0.5
+                t0 = 0.0
+                t1 = min(tail, est_dur)
+            if t1 - t0 < 0.2:
+                t1 = min(tail, t0 + 0.5)
 
-            # Suppress other popups while the card is on screen: drop popups
-            # inside the card window, and trim ones that start before it ends.
-            card_end = float(end_sec)
-            min_visible = 0.30
-            kept: List[PopupImage] = []
-            for p in popups:
-                if p.path == card_path:
-                    kept.append(p)
-                    continue
-                if p.end_sec <= card_end + 0.05:
-                    continue
-                if p.start_sec < card_end + 0.05:
-                    new_start = card_end + 0.05
-                    if p.end_sec - new_start < min_visible:
-                        continue
-                    p.start_sec = new_start
-                kept.append(p)
-            popups = sorted(kept, key=lambda p: p.start_sec)
+            already_covered = any(p.start_sec < t1 and p.end_sec > t0 for p in popups)
+            if already_covered:
+                print(
+                    f"First-sentence popup already covered by existing popup "
+                    f"({t0:.2f}s -> {t1:.2f}s)."
+                )
+            else:
+                hook_keys = text_keywords(first_sentence)
+                exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+                chosen: Path | None = None
+                story_candidates = [
+                    p for p in story_images_dir.glob("*")
+                    if p.is_file() and p.suffix.lower() in exts
+                ]
+                if story_candidates:
+                    scored: list[tuple[int, float, Path]] = []
+                    for p in story_candidates:
+                        name_blob = f"{p.parent.name} {p.stem}".replace("_", " ").replace("-", " ")
+                        overlap = len(hook_keys.intersection(text_keywords(name_blob)))
+                        scored.append((overlap, random.random(), p))
+                    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    chosen = scored[0][2]
+                if chosen is None:
+                    fallback_files = [
+                        p for p in images_dir.glob("*")
+                        if p.is_file() and p.suffix.lower() in exts
+                    ]
+                    if fallback_files:
+                        chosen = random.choice(fallback_files)
 
-            # Make sure popups resume quickly after the card disappears: if the
-            # first non-card popup starts more than 1.5s after the card ends,
-            # pull it forward to ~0.3s after card ends.
-            max_lead = 1.5
-            quick_resume = card_end + 0.30
-            for p in popups:
-                if p.path == card_path:
-                    continue
-                if p.start_sec - card_end > max_lead:
-                    delta = p.start_sec - quick_resume
-                    if delta > 0:
-                        new_end = max(quick_resume + min_visible, p.end_sec - delta)
-                        p.start_sec = quick_resume
-                        p.end_sec = new_end
-                break
-
-            # Suppress subtitles while the card is on screen by rebuilding the
-            # karaoke .ass from word segments that start at/after card_end.
-            try:
-                if subtitle_segments:
-                    filtered_words: List[Word] = []
-                    for seg in subtitle_segments:
-                        try:
-                            s = float(seg["start"])
-                            e = float(seg["end"])
-                        except Exception:
-                            continue
-                        if s < card_end:
-                            continue
-                        text = str(seg.get("raw_text") or seg.get("text") or "").strip()
-                        if not text:
-                            continue
-                        filtered_words.append(Word(text=text, start=s, end=max(e, s + 0.05)))
-                    if filtered_words:
-                        write_karaoke_block_ass(filtered_words, subtitle_file)
-            except Exception as exc:
-                print(f"Subtitle suppression failed: {exc}")
+                if chosen is None:
+                    print("First-sentence guarantee: no local popup assets available; skipping.")
+                else:
+                    target_dur = 1.6
+                    window_dur = max(0.0, t1 - t0)
+                    if window_dur <= target_dur:
+                        start_sec = t0
+                        end_sec = t1
+                    else:
+                        center = 0.5 * (t0 + t1)
+                        start_sec = max(t0, center - target_dur / 2)
+                        end_sec = min(t1, start_sec + target_dur)
+                    width = 700
+                    popups.append(
+                        PopupImage(
+                            path=chosen,
+                            start_sec=start_sec,
+                            end_sec=end_sec,
+                            x=(1080 - width) // 2,
+                            y=860,
+                            width=width,
+                            play_sfx=True,
+                            use_fade=True,
+                        )
+                    )
+                    print(
+                        f"First-sentence popup guaranteed: {chosen.name} "
+                        f"({start_sec:.2f}s -> {end_sec:.2f}s)"
+                    )
         popups.sort(key=lambda p: p.start_sec)
-    except _SkipRedditCard:
+    except _SkipFirstSentencePopup:
         pass
     except Exception as exc:
-        print(f"Reddit hook card generation failed: {exc}")
+        print(f"First-sentence popup guarantee failed: {exc}")
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
