@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import random
+import re
 import shlex
+import subprocess
 import time
 from pathlib import Path
 from typing import List
@@ -11,11 +13,71 @@ from typing import List
 from .runner import ffprobe_duration_seconds, run_ffmpeg_with_progress
 from .types import PopupImage
 
+# Gameplay files that should play at real-time speed (no 4x PTS ramp).
+_REALTIME_GAMEPLAY_FILENAMES = frozenset(
+    {
+        "2026-05-16 14-56-45.mov",
+    }
+)
+_DEFAULT_GAMEPLAY_SPEED = 4.0
+
+
+def gameplay_speed_factor(gameplay_path: Path) -> float:
+    """Return source consumption multiplier: 4.0 = legacy 4x fast-forward, 1.0 = real-time."""
+    name = gameplay_path.name
+    if name in _REALTIME_GAMEPLAY_FILENAMES:
+        return 1.0
+    if "minecraft" in name.lower():
+        return 1.0
+    return _DEFAULT_GAMEPLAY_SPEED
+
+
+def detect_content_crop(
+    video_path: Path,
+    start_time: float = 0.0,
+    source_top_crop: int = 0,
+) -> str | None:
+    """Detect and remove letterboxing (OBS window padding) via cropdetect."""
+    top_crop = max(0, int(source_top_crop))
+    pre = f"crop=in_w:in_h-{top_crop}:0:{top_crop}," if top_crop > 0 else ""
+    vf = f"{pre}cropdetect=24:16:0"
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-ss",
+        f"{max(0.0, float(start_time)):.3f}",
+        "-i",
+        str(video_path),
+        "-vf",
+        vf,
+        "-frames:v",
+        "45",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except Exception:
+        return None
+    stderr = proc.stderr or ""
+    last: tuple[str, str, str, str] | None = None
+    for line in stderr.splitlines():
+        if "crop=" not in line:
+            continue
+        match = re.search(r"crop=(\d+):(\d+):(\d+):(\d+)", line)
+        if match:
+            last = match.groups()
+    if last is None:
+        return None
+    w, h, x, y = (int(v) for v in last)
+    return f"crop={w}:{h}:{x}:{y},"
+
 
 def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
     if not sounds_dir.exists():
         return
-    blocked_keywords = {"fahhh", "taco", "bell"}
+    blocked_keywords = {"fahhh", "taco", "bell", "discord"}
     all_sounds = sorted(
         p for p in sounds_dir.iterdir()
         if p.is_file()
@@ -27,6 +89,9 @@ def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
     last_sfx: Path | None = None
     for popup in popups:
         if not popup.play_sfx:
+            continue
+        if popup.sfx_path is not None:
+            last_sfx = popup.sfx_path
             continue
         choices = [s for s in all_sounds if s != last_sfx] or all_sounds
         popup.sfx_path = random.choice(choices)
@@ -82,18 +147,28 @@ def build_filter_complex(
     hook_video_duration: float = 1.5,
     hook_text: str | None = None,
     source_top_crop: int = 96,
+    content_crop: str | None = None,
+    gameplay_speed: float = _DEFAULT_GAMEPLAY_SPEED,
 ) -> str:
     chains = []
     top_crop = max(0, int(source_top_crop))
     crop_prefix = f"crop=in_w:in_h-{top_crop}:0:{top_crop}," if top_crop > 0 else ""
+    letterbox_crop = content_crop or ""
+    speed = max(1.0, float(gameplay_speed))
+    source_span = total_duration * speed
+    pts_chain = "setpts=PTS-STARTPTS,"
+    if speed > 1.0:
+        pts_chain += f"setpts={(1.0 / speed):.6f}*PTS,"
+    # Center-crop a 9:16 portrait window, then scale to the Shorts canvas.
     chains.append(
         "[0:v]"
         f"{crop_prefix}"
-        f"trim=start={start_time:.3f}:duration={total_duration * 4.0:.3f},"
-        "setpts=PTS-STARTPTS,"
-        "setpts=0.25*PTS,"
-        "scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,"
+        f"{letterbox_crop}"
+        "crop=in_h*9/16:in_h:(iw-in_h*9/16)/2:0,"
+        f"trim=start={start_time:.3f}:duration={source_span:.3f},"
+        f"{pts_chain}"
+        "scale=1080:1920:flags=lanczos,"
+        "setsar=1,"
         "fps=60"
         "[v0]"
     )
@@ -188,9 +263,9 @@ def build_filter_complex(
             .replace("'", "\\'")
             .replace(",", "\\,")
         )
-        chains.append(f"[{current}]subtitles=filename={escaped_srt}[vout]")
+        chains.append(f"[{current}]subtitles=filename={escaped_srt},setsar=1[vout]")
     else:
-        chains.append(f"[{current}]null[vout]")
+        chains.append(f"[{current}]setsar=1[vout]")
     return ";".join(chains)
 
 
@@ -216,8 +291,13 @@ def compose_video(
     narration_duration = ffprobe_duration_seconds(narration_path)
     target_duration = duration_seconds if duration_seconds is not None else narration_duration
     gameplay_duration = ffprobe_duration_seconds(gameplay_path)
-    required_source_duration = target_duration * 4.0
+    speed_factor = gameplay_speed_factor(gameplay_path)
+    required_source_duration = target_duration * speed_factor
     unique_mux_token = str(time.time_ns())
+    if speed_factor <= 1.0:
+        print(f"Gameplay real-time speed: {gameplay_path.name}")
+    else:
+        print(f"Gameplay {speed_factor:.0f}x speed: {gameplay_path.name}")
 
     if gameplay_duration <= required_source_duration + 0.5:
         start_time = 0.0
@@ -233,6 +313,11 @@ def compose_video(
         input_parts.append(f"-i {shlex.quote(str(hook_video_path))}")
         hook_video_input_index = len(input_parts) - 1
 
+    content_crop = detect_content_crop(
+        gameplay_path, start_time=start_time, source_top_crop=source_top_crop
+    )
+    if content_crop:
+        print(f"Gameplay letterbox crop: {content_crop.rstrip(',')}")
     filter_complex = build_filter_complex(
         subtitle_path=srt_path,
         start_time=start_time,
@@ -243,6 +328,8 @@ def compose_video(
         hook_video_duration=hook_video_duration,
         hook_text=hook_text,
         source_top_crop=source_top_crop,
+        content_crop=content_crop,
+        gameplay_speed=speed_factor,
     )
     for popup in popup_images:
         if popup.path.suffix.lower() == ".gif":

@@ -24,6 +24,8 @@ from flask import Flask, Response, jsonify, render_template_string, request, sen
 PROJECT_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = PROJECT_ROOT / "output"
 HOOK_DIR = OUTPUT_DIR / "hook_image"
+GAMEPLAY_DIR = PROJECT_ROOT / "assets" / "gameplay"
+GAMEPLAY_EXTS = {".mp4", ".mov", ".mkv", ".webm"}
 
 app = Flask(__name__)
 
@@ -95,7 +97,9 @@ def _build_cmd(payload: dict[str, Any]) -> list[str]:
     add_val("popup_sfx_volume", "--popup-sfx-volume")
     add_val("popup_sfx_speed", "--popup-sfx-speed")
     add_val("popup_sfx_trim_seconds", "--popup-sfx-trim-seconds")
+    add_val("bgm_path", "--bgm-path")
     add_val("bgm_volume", "--bgm-volume")
+    add_val("gameplay_path", "--gameplay-path")
     add_val("gameplay_top_crop", "--gameplay-top-crop")
     add_val("script", "--script")
 
@@ -108,6 +112,7 @@ def _build_cmd(payload: dict[str, Any]) -> list[str]:
     add_flag("no_description", "--no-description")
     add_flag("upload", "--upload")
     add_flag("upload_only", "--upload-only")
+    add_flag("no_popup_sfx", "--no-popup-sfx")
     return cmd
 
 
@@ -229,6 +234,26 @@ def _latest_file(folder: Path, suffixes: set[str]) -> Path | None:
         return None
     matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return matches[0]
+
+
+def _list_gameplay_files() -> list[dict[str, str]]:
+    if not GAMEPLAY_DIR.exists():
+        return []
+    items = [
+        p
+        for p in GAMEPLAY_DIR.iterdir()
+        if p.is_file() and p.suffix.lower() in GAMEPLAY_EXTS
+    ]
+    items.sort(key=lambda p: p.name.lower())
+    return [
+        {"name": p.name, "path": str(p.relative_to(PROJECT_ROOT))}
+        for p in items
+    ]
+
+
+@app.route("/api/gameplay")
+def api_gameplay():
+    return jsonify({"files": _list_gameplay_files()})
 
 
 @app.route("/api/latest")
@@ -679,15 +704,20 @@ INDEX_HTML = r"""<!doctype html>
                 <input type="text" id="topic" placeholder="e.g. people blasting speakerphone in public"></div>
             </div>
             <div class="sep"></div>
-            <div class="field"><label>Script override (for images-only)</label>
-              <textarea id="script" placeholder="Leave empty to use output/script.txt"></textarea>
-              <div class="hint">Only used when running images-only mode.</div></div>
+            <div class="field"><label>Custom script (optional)</label>
+              <textarea id="script" rows="8" placeholder="Paste your narration here to skip AI script generation. Leave empty to auto-generate from topic."></textarea>
+              <div class="hint">When filled, this text is used for TTS, subtitles, popups, and metadata. Topic and word count are ignored for script generation.</div></div>
           </section>
 
           <section data-view="audio">
             <div class="grid-2">
               <div class="field"><label>TTS engine</label>
                 <select id="tts"><option value="cloner">cloner (local Adam)</option><option value="openai">openai</option></select></div>
+              <div class="field"><label>Background music</label>
+                <select id="bgm_path">
+                  <option value="assets/Chopin - Nocturne op.9 No.2.mp3">Chopin — Nocturne op.9 No.2</option>
+                  <option value="assets/undertale-fallen down but more comforting.mp3">Undertale — Fallen Down (comforting)</option>
+                </select></div>
               <div class="field"><label>BGM volume</label>
                 <input type="number" id="bgm_volume" step="0.01" value="0.25"></div>
             </div>
@@ -706,10 +736,19 @@ INDEX_HTML = r"""<!doctype html>
               <div class="field"><label>SFX trim (s)</label>
                 <input type="number" id="popup_sfx_trim_seconds" step="0.1" value="1.4"></div>
             </div>
+            <div class="sep"></div>
+            <div class="field"><div class="row-inline"><label>Mute popup sound effects</label>
+              <label class="switch"><input type="checkbox" id="no_popup_sfx"><span class="slider"></span></label></div>
+              <div class="hint">Turns off random popup SFX. The opening popup still plays the Discord notification.</div></div>
           </section>
 
           <section data-view="video">
             <div class="grid-2">
+              <div class="field"><label>Gameplay video</label>
+                <select id="gameplay_path">
+                  <option value="">Random</option>
+                </select>
+                <div class="hint">Random picks one of the videos in assets/gameplay.</div></div>
               <div class="field"><label>Gameplay top crop (px)</label>
                 <input type="number" id="gameplay_top_crop" value="96"></div>
               <div class="field"><label>Duration (s, optional)</label>
@@ -798,10 +837,11 @@ INDEX_HTML = r"""<!doctype html>
   // Inputs
   const inputIds = [
     "words","topic","tts","privacy","duration_seconds","speed_ramp_ms","speed_slow","speed_fast",
-    "popup_sfx_volume","popup_sfx_speed","popup_sfx_trim_seconds","bgm_volume","gameplay_top_crop",
+    "popup_sfx_volume","popup_sfx_speed","popup_sfx_trim_seconds","bgm_path","bgm_volume",
+    "gameplay_path","gameplay_top_crop",
     "script",
     "dynamic_speed","generate_images","images_only","skip_tts","video_only","quick_test",
-    "no_description","upload"
+    "no_description","no_popup_sfx","upload"
   ];
   function collect() {
     const data = {};
@@ -1043,6 +1083,24 @@ INDEX_HTML = r"""<!doctype html>
     } catch (e) {}
   };
 
+  async function loadGameplayOptions() {
+    const sel = $("gameplay_path");
+    if (!sel) return;
+    try {
+      const res = await fetch("/api/gameplay");
+      const data = await res.json();
+      const current = sel.value;
+      sel.innerHTML = '<option value="">Random</option>';
+      for (const f of data.files || []) {
+        const opt = document.createElement("option");
+        opt.value = f.path;
+        opt.textContent = f.name;
+        sel.appendChild(opt);
+      }
+      if (current) sel.value = current;
+    } catch (e) {}
+  }
+
   (async function init() {
     const res = await fetch("/api/status"); const data = await res.json();
     if (data.running) {
@@ -1050,6 +1108,7 @@ INDEX_HTML = r"""<!doctype html>
       runBtn.disabled = true; stopBtn.disabled = false;
       cmdDisplay.textContent = data.cmd || "";
     }
+    await loadGameplayOptions();
     refreshPreview();
   })();
 </script>

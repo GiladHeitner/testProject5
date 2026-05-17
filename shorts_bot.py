@@ -51,10 +51,6 @@ from shorts_bot_lib.transcribe import (
 # Reddit card feature disabled; keep import commented for easy re-enable.
 # from shorts_bot_lib.reddit_card import RedditCardSpec, render_reddit_card_png
 from shorts_bot_lib.types import PopupImage
-
-
-class _SkipFirstSentencePopup(Exception):
-    """Sentinel used to bail out of the first-sentence guarantee when disabled."""
 from shorts_bot_lib.video import compose_video, pick_sfx_for_popups
 from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
@@ -119,7 +115,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--script",
         default="",
-        help="Optional script text to use for --images-only (otherwise uses output/script.txt).",
+        help="Use this narration text instead of generating a script (full pipeline or --images-only).",
     )
     parser.add_argument(
         "--duration-seconds",
@@ -133,8 +129,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--popup-sfx-volume", type=float, default=0.55)
     parser.add_argument("--popup-sfx-speed", type=float, default=1.25)
     parser.add_argument("--popup-sfx-trim-seconds", type=float, default=1.4)
+    parser.add_argument(
+        "--no-popup-sfx",
+        action="store_true",
+        help="Disable random popup sound effects. The opening popup still "
+             "plays assets/discord-notification.mp3 when present.",
+    )
     parser.add_argument("--bgm-path", default="assets/Chopin - Nocturne op.9 No.2.mp3")
     parser.add_argument("--bgm-volume", type=float, default=0.08)
+    parser.add_argument(
+        "--gameplay-path",
+        default=None,
+        help="Gameplay video file (default: random pick from assets/gameplay).",
+    )
     parser.add_argument("--gameplay-top-crop", type=int, default=96)
     parser.add_argument(
         "--quick-test",
@@ -168,9 +175,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-reddit-card",
         action="store_true",
-        help="Skip the first-sentence guarantee popup. The Reddit hook card "
-             "feature itself is disabled; this flag is kept for backward "
-             "compatibility and now controls only the guaranteed first-sentence popup.",
+        help="Skip the opening hook popup at t=0 (and its Discord chime). "
+             "Kept for backward compatibility as --no-reddit-card.",
     )
     return parser
 
@@ -192,6 +198,120 @@ def _confirm_script_interactive(script: str) -> bool:
         return True
     print("Regenerating...\n")
     return False
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_OPENING_POPUP_MIN_SEC = 1.6
+_OPENING_POPUP_MAX_SEC = 2.2
+_OPENING_AT_START_THRESHOLD_SEC = 0.2
+
+
+def _first_sentence_from_script(script: str) -> str:
+    normalized = script.replace("\r\n", "\n").replace("\r", "\n")
+    first_block = normalized.split("\n\n", 1)[0].strip()
+    if not first_block or first_block == normalized.strip():
+        first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
+    if len(first_block.split()) > 20:
+        first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
+    return first_block or script.split(".")[0].strip()
+
+
+def _pick_popup_image_for_text(
+    phrase: str,
+    story_images_dir: Path,
+    images_dir: Path,
+) -> Path | None:
+    hook_keys = text_keywords(phrase)
+    story_candidates = [
+        p for p in story_images_dir.glob("*")
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+    ]
+    if story_candidates:
+        scored: list[tuple[int, float, Path]] = []
+        for p in story_candidates:
+            name_blob = f"{p.parent.name} {p.stem}".replace("_", " ").replace("-", " ")
+            overlap = len(hook_keys.intersection(text_keywords(name_blob)))
+            scored.append((overlap, random.random(), p))
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return scored[0][2]
+    fallback_files = [
+        p for p in images_dir.glob("*")
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+    ]
+    if fallback_files:
+        return random.choice(fallback_files)
+    return None
+
+
+def _ensure_opening_popup_at_start(
+    popups: List[PopupImage],
+    *,
+    script: str,
+    story_images_dir: Path,
+    images_dir: Path,
+    narration_duration: float,
+    subtitle_segments: List[dict],
+    narration_reference_segments: List[dict],
+    output_dir: Path,
+    find_spoken_window,
+) -> PopupImage | None:
+    """Guarantee a popup at t=0 (opening hook). Caller assigns Discord SFX to it."""
+    phrase = _first_sentence_from_script(script)
+    if not phrase:
+        return None
+    chosen = _pick_popup_image_for_text(phrase, story_images_dir, images_dir)
+    if chosen is None:
+        print("Opening popup: no local image assets available; skipping.")
+        return None
+
+    tail = max(0.0, narration_duration - 0.05)
+    end_sec = min(tail, _OPENING_POPUP_MAX_SEC)
+    srt_word_segments: List[dict] = []
+    srt_path = output_dir / "subtitles.srt"
+    if srt_path.exists():
+        try:
+            srt_word_segments = read_srt_segments(srt_path)
+        except Exception as exc:
+            print(f"Could not read {srt_path}: {exc}")
+    win = find_spoken_window(phrase, srt_word_segments) if srt_word_segments else None
+    if win is None and narration_reference_segments:
+        win = find_spoken_window(phrase, narration_reference_segments)
+    if win is None and subtitle_segments:
+        win = find_spoken_window(phrase, subtitle_segments)
+    if win is not None:
+        end_sec = min(tail, max(_OPENING_POPUP_MIN_SEC, float(win[1])))
+    end_sec = max(_OPENING_POPUP_MIN_SEC, min(tail, end_sec))
+
+    at_start = [p for p in popups if p.start_sec < _OPENING_AT_START_THRESHOLD_SEC]
+    width = 700
+    if at_start:
+        opening = min(at_start, key=lambda p: p.start_sec)
+        opening.start_sec = 0.0
+        opening.end_sec = max(opening.end_sec, end_sec)
+        opening.play_sfx = True
+        print(
+            f"Opening popup at video start: {opening.path.name} "
+            f"(0.00s -> {opening.end_sec:.2f}s)"
+        )
+        return opening
+
+    opening = PopupImage(
+        path=chosen,
+        start_sec=0.0,
+        end_sec=end_sec,
+        x=(1080 - width) // 2,
+        y=860,
+        width=width,
+        play_sfx=True,
+        use_fade=True,
+    )
+    popups.append(opening)
+    popups.sort(key=lambda p: p.start_sec)
+    print(
+        f"Opening popup at video start: {chosen.name} "
+        f"(0.00s -> {end_sec:.2f}s)"
+    )
+    return opening
 
 
 def _run_upload_only(
@@ -382,7 +502,14 @@ def main() -> None:
         _run_upload_only(args, client, output_dir)
         return
 
-    gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
+    if args.gameplay_path:
+        gameplay_file = Path(args.gameplay_path)
+        if not gameplay_file.is_absolute():
+            gameplay_file = project_root / gameplay_file
+        if not gameplay_file.exists():
+            raise FileNotFoundError(f"Gameplay file not found: {gameplay_file}")
+    else:
+        gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
 
     total_steps = 6 + (1 if args.upload else 0)
     step = 1
@@ -390,12 +517,19 @@ def main() -> None:
 
     # Step 1: script
     script_file = output_dir / "script.txt"
+    provided_script = (args.script or "").strip()
     if args.video_only:
         print_progress(step, total_steps, "Reusing existing script")
         if script_file.exists():
             script = script_file.read_text(encoding="utf-8").strip()
         else:
             script = "Crazy School Story You Won't Believe"
+    elif provided_script:
+        print_progress(step, total_steps, "Using custom script")
+        script = provided_script
+        print("\n--- Custom Script ---")
+        print(script.replace("*", ""))
+        print("---------------------")
     else:
         while True:
             print_progress(step, total_steps, "Generating story script")
@@ -406,7 +540,7 @@ def main() -> None:
             print("------------------------")
             if _confirm_script_interactive(script):
                 break
-        script_file.write_text(script, encoding="utf-8")
+    script_file.write_text(script, encoding="utf-8")
 
     # Step 2: voiceover
     step += 1
@@ -560,128 +694,44 @@ def main() -> None:
     if not popups and not args.no_fallback_popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
 
-    # Reddit-style hook card is disabled. Original implementation is preserved
-    # below in a commented-out block in case we want to bring it back. The new
-    # behavior only guarantees that one normal popup overlaps the spoken first
-    # sentence; it does not strip other popups or rewrite subtitles.
-    #
-    # try:
-    #     ...render_reddit_card_png(...)...
-    #     popups.insert(0, PopupImage(path=card_path, ..., preserve_aspect=True))
-    #     # drop/trim popups during card window, rebuild karaoke .ass, etc.
-    # except Exception as exc:
-    #     print(f"Reddit hook card generation failed: {exc}")
-
-    # Guarantee at least one normal popup overlaps the spoken first sentence.
-    if args.no_reddit_card:
-        print("First-sentence popup guarantee disabled (--no-reddit-card).")
+    # Opening hook popup at t=0; Discord notification SFX is wired to it below.
+    opening_popup: PopupImage | None = None
     try:
-        if args.no_reddit_card:
-            raise _SkipFirstSentencePopup()
-        normalized_script = script.replace("\r\n", "\n").replace("\r", "\n")
-        first_block = normalized_script.split("\n\n", 1)[0].strip()
-        if not first_block or first_block == normalized_script.strip():
-            first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
-        if len(first_block.split()) > 20:
-            first_block = re.split(r"(?<=[.!?])\s+", first_block, maxsplit=1)[0].strip()
-        first_sentence = first_block or script.split(".")[0].strip()
-
-        if first_sentence:
-            srt_word_segments: List[dict] = []
-            srt_path = output_dir / "subtitles.srt"
-            if srt_path.exists():
-                try:
-                    srt_word_segments = read_srt_segments(srt_path)
-                except Exception as exc:
-                    print(f"Could not read {srt_path}: {exc}")
-            win = _find_spoken_window(first_sentence, srt_word_segments) if srt_word_segments else None
-            if win is None and narration_reference_segments:
-                win = _find_spoken_window(first_sentence, narration_reference_segments)
-            if win is None and subtitle_segments:
-                win = _find_spoken_window(first_sentence, subtitle_segments)
-
-            tail = max(0.0, narration_duration - 0.05)
-            if win is not None:
-                t0 = max(0.0, float(win[0]))
-                t1 = min(tail, float(win[1]))
-            else:
-                n_words = max(1, len(first_sentence.split()))
-                est_dur = n_words * 0.42 + 0.5
-                t0 = 0.0
-                t1 = min(tail, est_dur)
-            if t1 - t0 < 0.2:
-                t1 = min(tail, t0 + 0.5)
-
-            already_covered = any(p.start_sec < t1 and p.end_sec > t0 for p in popups)
-            if already_covered:
-                print(
-                    f"First-sentence popup already covered by existing popup "
-                    f"({t0:.2f}s -> {t1:.2f}s)."
-                )
-            else:
-                hook_keys = text_keywords(first_sentence)
-                exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-                chosen: Path | None = None
-                story_candidates = [
-                    p for p in story_images_dir.glob("*")
-                    if p.is_file() and p.suffix.lower() in exts
-                ]
-                if story_candidates:
-                    scored: list[tuple[int, float, Path]] = []
-                    for p in story_candidates:
-                        name_blob = f"{p.parent.name} {p.stem}".replace("_", " ").replace("-", " ")
-                        overlap = len(hook_keys.intersection(text_keywords(name_blob)))
-                        scored.append((overlap, random.random(), p))
-                    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-                    chosen = scored[0][2]
-                if chosen is None:
-                    fallback_files = [
-                        p for p in images_dir.glob("*")
-                        if p.is_file() and p.suffix.lower() in exts
-                    ]
-                    if fallback_files:
-                        chosen = random.choice(fallback_files)
-
-                if chosen is None:
-                    print("First-sentence guarantee: no local popup assets available; skipping.")
-                else:
-                    target_dur = 1.6
-                    window_dur = max(0.0, t1 - t0)
-                    if window_dur <= target_dur:
-                        start_sec = t0
-                        end_sec = t1
-                    else:
-                        center = 0.5 * (t0 + t1)
-                        start_sec = max(t0, center - target_dur / 2)
-                        end_sec = min(t1, start_sec + target_dur)
-                    width = 700
-                    popups.append(
-                        PopupImage(
-                            path=chosen,
-                            start_sec=start_sec,
-                            end_sec=end_sec,
-                            x=(1080 - width) // 2,
-                            y=860,
-                            width=width,
-                            play_sfx=True,
-                            use_fade=True,
-                        )
-                    )
-                    print(
-                        f"First-sentence popup guaranteed: {chosen.name} "
-                        f"({start_sec:.2f}s -> {end_sec:.2f}s)"
-                    )
-        popups.sort(key=lambda p: p.start_sec)
-    except _SkipFirstSentencePopup:
-        pass
+        opening_popup = _ensure_opening_popup_at_start(
+            popups,
+            script=script,
+            story_images_dir=story_images_dir,
+            images_dir=images_dir,
+            narration_duration=narration_duration,
+            subtitle_segments=subtitle_segments,
+            narration_reference_segments=narration_reference_segments,
+            output_dir=output_dir,
+            find_spoken_window=_find_spoken_window,
+        )
     except Exception as exc:
-        print(f"First-sentence popup guarantee failed: {exc}")
+        print(f"Opening popup failed: {exc}")
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
         project_root / "assets" / "sounds_normalized",
     )
-    pick_sfx_for_popups(popups, normalized_sounds_dir)
+    if args.no_popup_sfx:
+        for popup in popups:
+            if popup is opening_popup:
+                continue
+            popup.play_sfx = False
+            popup.sfx_path = None
+    discord_sfx = project_root / "assets" / "discord-notification.mp3"
+    discord_target = opening_popup
+    if discord_target is None and popups:
+        discord_target = min(popups, key=lambda p: (p.start_sec, p.end_sec))
+    if discord_target is not None and discord_sfx.exists():
+        discord_target.start_sec = 0.0
+        discord_target.play_sfx = True
+        discord_target.sfx_path = discord_sfx.resolve()
+        print(f"Discord SFX on opening popup: {discord_target.path.name}")
+    if not args.no_popup_sfx:
+        pick_sfx_for_popups(popups, normalized_sounds_dir)
 
     burn_subtitles = ffmpeg_has_subtitles_filter()
     if not burn_subtitles:
