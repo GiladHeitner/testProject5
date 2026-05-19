@@ -314,6 +314,43 @@ def _ensure_opening_popup_at_start(
     return opening
 
 
+def _apply_hook_popup_exclusivity(
+    popups: List[PopupImage],
+    opening: PopupImage,
+) -> List[PopupImage]:
+    """Keep only the opening popup visible during the hook window (Reddit-card behavior)."""
+    hook_end = float(opening.end_sec)
+    min_visible = 0.30
+    kept: List[PopupImage] = []
+    for popup in popups:
+        if popup is opening:
+            kept.append(popup)
+            continue
+        if popup.end_sec <= hook_end + 0.05:
+            continue
+        if popup.start_sec < hook_end + 0.05:
+            new_start = hook_end + 0.05
+            if popup.end_sec - new_start < min_visible:
+                continue
+            popup.start_sec = new_start
+        kept.append(popup)
+    kept.sort(key=lambda p: p.start_sec)
+
+    max_lead = 1.5
+    quick_resume = hook_end + 0.30
+    for popup in kept:
+        if popup is opening:
+            continue
+        if popup.start_sec - hook_end > max_lead:
+            delta = popup.start_sec - quick_resume
+            if delta > 0:
+                new_end = max(quick_resume + min_visible, popup.end_sec - delta)
+                popup.start_sec = quick_resume
+                popup.end_sec = new_end
+        break
+    return kept
+
+
 def _run_upload_only(
     args: argparse.Namespace,
     client: OpenAI | None,
@@ -710,6 +747,10 @@ def main() -> None:
         )
     except Exception as exc:
         print(f"Opening popup failed: {exc}")
+
+    if opening_popup is not None:
+        opening_popup.start_sec = 0.0
+        popups = _apply_hook_popup_exclusivity(popups, opening_popup)
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
