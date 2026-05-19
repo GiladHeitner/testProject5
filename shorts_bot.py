@@ -37,13 +37,13 @@ from shorts_bot_lib.runner import (
     print_progress,
 )
 from shorts_bot_lib.keyword_popups import build_keyword_popups
-from shorts_bot_lib.scene_assets import build_scene_popups
+from shorts_bot_lib.scene_assets import Scene, _fetch_scene_image, build_scene_popups
 from shorts_bot_lib.script_ai import (
     generate_metadata,
     generate_script,
 )
 from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
-from shorts_bot_lib.text import get_highlight_timestamps, text_keywords
+from shorts_bot_lib.text import get_highlight_timestamps
 from shorts_bot_lib.transcribe import (
     get_whisper_word_timestamps,
     transcribe_audio_to_srt,
@@ -200,7 +200,6 @@ def _confirm_script_interactive(script: str) -> bool:
     return False
 
 
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _OPENING_AT_START_THRESHOLD_SEC = 0.2
 _HOOK_END_PAD_SEC = 0.08
 
@@ -215,31 +214,79 @@ def _first_sentence_from_script(script: str) -> str:
     return first_block or script.split(".")[0].strip()
 
 
-def _pick_popup_image_for_text(
+_HOOK_STOCK_QUERY_SYSTEM = (
+    "You write 2-4 word stock-photo search queries for YouTube Shorts hook images. "
+    "Use visual nouns and adjectives only — no proper names, no verbs, no quotes."
+)
+
+
+def _hook_stock_search_query(phrase: str, client: OpenAI | None) -> str:
+    if client is not None:
+        try:
+            resp = client.chat.completions.create(
+                model=os.environ.get("KEYWORD_LLM_MODEL", "gpt-4o-mini"),
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _HOOK_STOCK_QUERY_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": (
+                            'Return JSON: {"query": "<2-4 word stock photo query>"}\n\n'
+                            f"Hook narration:\n{phrase.strip()}"
+                        ),
+                    },
+                ],
+                temperature=0.4,
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            data = json.loads(raw)
+            query = re.sub(r"[^a-zA-Z0-9 ]", " ", str(data.get("query") or "")).strip()
+            if query:
+                return query
+        except Exception as exc:
+            print(f"Hook stock query LLM failed: {exc}")
+    tokens = [
+        w for w in re.sub(r"[^a-z0-9 ]+", " ", phrase.lower()).split() if len(w) > 2
+    ]
+    stop = {
+        "the", "and", "that", "with", "this", "from", "your", "just", "were",
+        "have", "what", "when", "they", "them", "then", "into", "over", "about",
+        "there", "would", "could", "hate", "like", "people", "who",
+    }
+    visual = [t for t in tokens if t not in stop][:4]
+    return " ".join(visual) if visual else "dramatic scene"
+
+
+def _fetch_hook_stock_image(
     phrase: str,
-    story_images_dir: Path,
-    images_dir: Path,
+    client: OpenAI | None,
+    output_dir: Path,
 ) -> Path | None:
-    hook_keys = text_keywords(phrase)
-    story_candidates = [
-        p for p in story_images_dir.glob("*")
-        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
-    ]
-    if story_candidates:
-        scored: list[tuple[int, float, Path]] = []
-        for p in story_candidates:
-            name_blob = f"{p.parent.name} {p.stem}".replace("_", " ").replace("-", " ")
-            overlap = len(hook_keys.intersection(text_keywords(name_blob)))
-            scored.append((overlap, random.random(), p))
-        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        return scored[0][2]
-    fallback_files = [
-        p for p in images_dir.glob("*")
-        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
-    ]
-    if fallback_files:
-        return random.choice(fallback_files)
-    return None
+    """Fetch a Pexels/Unsplash stock photo for the hook (not local reaction images)."""
+    if client is None:
+        print("Opening popup: OPENAI_API_KEY required for stock image search.")
+        return None
+    pexels_key = os.environ.get("PEXELS_API_KEY")
+    unsplash_key = os.environ.get("UNSPLASH_ACCESS_KEY")
+    if not pexels_key and not unsplash_key:
+        print("Opening popup: set PEXELS_API_KEY or UNSPLASH_ACCESS_KEY.")
+        return None
+    query = _hook_stock_search_query(phrase, client)
+    print(f"Fetching hook stock image (Pexels/Unsplash): {query!r}")
+    scene = Scene(
+        index=0,
+        text=phrase,
+        query=query,
+        word_count=max(1, len(query.split())),
+    )
+    return _fetch_scene_image(
+        scene=scene,
+        out_dir=output_dir / "hook_popup",
+        openai_client=client,
+        pexels_key=pexels_key,
+        unsplash_key=unsplash_key,
+        gemini_key=os.environ.get("GEMINI_API_KEY"),
+    )
 
 
 def _resolve_hook_spoken_window(
@@ -281,8 +328,7 @@ def _ensure_opening_popup_at_start(
     popups: List[PopupImage],
     *,
     script: str,
-    story_images_dir: Path,
-    images_dir: Path,
+    client: OpenAI | None,
     narration_duration: float,
     subtitle_segments: List[dict],
     narration_reference_segments: List[dict],
@@ -293,9 +339,9 @@ def _ensure_opening_popup_at_start(
     phrase = _first_sentence_from_script(script)
     if not phrase:
         return None
-    chosen = _pick_popup_image_for_text(phrase, story_images_dir, images_dir)
+    chosen = _fetch_hook_stock_image(phrase, client, output_dir)
     if chosen is None:
-        print("Opening popup: no local image assets available; skipping.")
+        print("Opening popup: stock image fetch failed; skipping.")
         return None
 
     tail = max(0.0, narration_duration - 0.05)
@@ -324,6 +370,7 @@ def _ensure_opening_popup_at_start(
     width = 700
     if at_start:
         opening = min(at_start, key=lambda p: p.start_sec)
+        opening.path = chosen
         opening.start_sec = start_sec
         opening.end_sec = end_sec
         opening.play_sfx = True
@@ -775,8 +822,7 @@ def main() -> None:
         opening_popup = _ensure_opening_popup_at_start(
             popups,
             script=script,
-            story_images_dir=story_images_dir,
-            images_dir=images_dir,
+            client=client,
             narration_duration=narration_duration,
             subtitle_segments=subtitle_segments,
             narration_reference_segments=narration_reference_segments,
