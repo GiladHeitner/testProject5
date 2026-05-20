@@ -7,17 +7,22 @@ endpoints (no Reddit app required).
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
 import random
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
+
+_OAUTH_TOKEN: str | None = None
 
 DEFAULT_SUBREDDITS = (
     "schoolrant",
@@ -41,7 +46,6 @@ class SubredditSource:
 DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
     # top/week is empty on this small sub; hot has active rants
     SubredditSource("schoolrant", kind="hot", limit=50),
-    SubredditSource("MiddleSchool", kind="top", time_filter="week", limit=50),
     SubredditSource(
         "teenagers",
         kind="search",
@@ -71,14 +75,17 @@ class RedditPost:
         """Full post body for --topic / script generation."""
         title = self.title.strip()
         body = self.selftext.strip()
-        lines = [
-            f"Reddit post from r/{self.subreddit}:",
-            "",
-            title,
-            "",
-            body,
-        ]
-        text = "\n".join(lines).strip()
+        if self.subreddit == "topics":
+            text = title
+        else:
+            lines = [
+                f"Reddit post from r/{self.subreddit}:",
+                "",
+                title,
+                "",
+                body,
+            ]
+            text = "\n".join(lines).strip()
         if len(text) > MAX_TOPIC_CHARS:
             text = text[: MAX_TOPIC_CHARS - 3].rstrip() + "..."
         return text
@@ -97,8 +104,120 @@ def _load_used_ids(used_file: Path) -> set[str]:
 def _user_agent() -> str:
     return os.environ.get(
         "REDDIT_USER_AGENT",
-        "VideoBots/1.0 (automated shorts topic picker)",
+        "VideoBots:shorts-topic-picker:v1.0 (by /u/GiladHeitner; "
+        "https://github.com/GiladHeitner/YoutubeUploader)",
     ).strip()
+
+
+def _request_headers(*, bearer: str | None = None) -> dict[str, str]:
+    headers = {
+        "User-Agent": _user_agent(),
+        "Accept": "application/json",
+    }
+    if bearer:
+        headers["Authorization"] = f"bearer {bearer}"
+    return headers
+
+
+def _oauth_token() -> str | None:
+    """Application-only OAuth token (works from CI when API secrets are set)."""
+    global _OAUTH_TOKEN
+    if _OAUTH_TOKEN:
+        return _OAUTH_TOKEN
+    if not _has_praw_credentials():
+        return None
+    cid = os.environ["REDDIT_CLIENT_ID"].strip()
+    secret = os.environ["REDDIT_CLIENT_SECRET"].strip()
+    auth = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+    req = urllib.request.Request(
+        "https://www.reddit.com/api/v1/access_token",
+        data=b"grant_type=client_credentials",
+        headers={
+            "Authorization": f"Basic {auth}",
+            "User-Agent": _user_agent(),
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.load(resp)
+    except Exception as exc:
+        print(f"[reddit] OAuth token failed: {exc}", file=sys.stderr)
+        return None
+    token = (payload.get("access_token") or "").strip()
+    if token:
+        _OAUTH_TOKEN = token
+        print("[reddit] Using OAuth API (client credentials).", file=sys.stderr)
+    return token or None
+
+
+def _http_json(url: str, headers: dict[str, str], *, retries: int = 2) -> dict[str, Any]:
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if exc.code in (403, 429, 503) and attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_err = exc
+            if attempt < retries:
+                time.sleep(1.0)
+                continue
+            raise
+    raise last_err  # type: ignore[misc]
+
+
+def _should_use_topics_fallback() -> bool:
+    if os.environ.get("REDDIT_NO_TOPICS_FALLBACK") == "1":
+        return False
+    if os.environ.get("REDDIT_TOPICS_FALLBACK") == "1":
+        return True
+    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
+        return True
+    return Path(os.environ.get("TOPICS_FILE", "topics.txt")).is_file()
+
+
+def pick_topics_file_fallback(
+    used_file: Path | None = None,
+    topics_file: Path | None = None,
+) -> RedditPost:
+    """Fallback when Reddit blocks datacenter IPs (e.g. GitHub Actions)."""
+    topics_path = topics_file or Path(os.environ.get("TOPICS_FILE", "topics.txt"))
+    if not topics_path.is_file():
+        raise RuntimeError(f"Topics fallback file not found: {topics_path}")
+    used_path = used_file or Path(".github/used_topics.txt")
+    used_ids = _load_used_ids(used_path)
+    topics = [
+        line.strip()
+        for line in topics_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not topics:
+        raise RuntimeError(f"No topics in {topics_path}")
+    fresh = [
+        t
+        for t in topics
+        if f"topic:{hashlib.sha256(t.encode()).hexdigest()[:12]}" not in used_ids
+    ]
+    pool = fresh if fresh else topics
+    chosen = random.choice(pool)
+    post_id = f"topic:{hashlib.sha256(chosen.encode()).hexdigest()[:12]}"
+    print(f"[reddit] topics.txt fallback: {chosen[:72]!r}", file=sys.stderr)
+    return RedditPost(
+        post_id=post_id,
+        subreddit="topics",
+        title=chosen,
+        selftext="",
+        permalink="",
+        score=0,
+    )
 
 
 def _has_praw_credentials() -> bool:
@@ -171,22 +290,55 @@ def _resolve_sources(subreddits: list[str] | None) -> list[SubredditSource]:
     ]
 
 
-def _listing_url(source: SubredditSource) -> str:
+def _listing_path(source: SubredditSource, *, json_suffix: bool = True) -> str:
     name = source.name
     limit = source.limit
+    ext = ".json" if json_suffix else ""
     if source.kind == "search":
         q = urllib.parse.quote(source.search_query)
         return (
-            f"https://www.reddit.com/r/{name}/search.json"
+            f"/r/{name}/search{ext}"
             f"?q={q}&restrict_sr=1&sort=top&t={source.time_filter}"
             f"&limit={limit}&raw_json=1"
         )
     if source.kind == "hot":
-        return f"https://www.reddit.com/r/{name}/hot.json?limit={limit}&raw_json=1"
+        return f"/r/{name}/hot{ext}?limit={limit}&raw_json=1"
     return (
-        f"https://www.reddit.com/r/{name}/top.json"
-        f"?t={source.time_filter}&limit={limit}&raw_json=1"
+        f"/r/{name}/top{ext}?t={source.time_filter}&limit={limit}&raw_json=1"
     )
+
+
+def _listing_urls(source: SubredditSource) -> list[str]:
+    path = _listing_path(source, json_suffix=True)
+    return [
+        f"https://oauth.reddit.com{path.replace('.json', '')}",
+        f"https://www.reddit.com{path}",
+        f"https://old.reddit.com{path}",
+    ]
+
+
+def _fetch_listing_payload(source: SubredditSource) -> dict[str, Any] | None:
+    token = _oauth_token()
+    if token:
+        oauth_url = f"https://oauth.reddit.com{_listing_path(source, json_suffix=False)}"
+        try:
+            return _http_json(oauth_url, _request_headers(bearer=token))
+        except Exception as exc:
+            print(
+                f"[reddit] OAuth skip r/{source.name}: {exc}",
+                file=sys.stderr,
+            )
+    for url in _listing_urls(source)[1:]:
+        try:
+            return _http_json(url, _request_headers())
+        except urllib.error.HTTPError as exc:
+            print(
+                f"[reddit] skip r/{source.name} ({url.split('/')[2]}): HTTP {exc.code}",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(f"[reddit] skip r/{source.name}: {exc}", file=sys.stderr)
+    return None
 
 
 def _submission_dict(submission) -> dict[str, Any]:
@@ -219,36 +371,16 @@ def _iter_submission_list(reddit, source: SubredditSource):
 
 def _iter_candidates_public(sources: list[SubredditSource]) -> Iterator[RedditPost]:
     for source in sources:
-        url = _listing_url(source)
-        req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                payload = json.load(resp)
-        except urllib.error.HTTPError as exc:
-            print(
-                f"[reddit] skip r/{source.name} ({source.kind}): HTTP {exc.code}",
-                file=sys.stderr,
-            )
-            continue
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            print(f"[reddit] skip r/{source.name} (public): {exc}", file=sys.stderr)
+        payload = _fetch_listing_payload(source)
+        if payload is None:
             continue
         children = payload.get("data", {}).get("children", [])
         if not children and source.kind == "top":
-            # e.g. r/schoolrant has no top/week posts — try hot
             hot = SubredditSource(source.name, kind="hot", limit=source.limit)
-            try:
-                with urllib.request.urlopen(
-                    urllib.request.Request(
-                        _listing_url(hot), headers={"User-Agent": _user_agent()}
-                    ),
-                    timeout=30,
-                ) as resp:
-                    payload = json.load(resp)
-                children = payload.get("data", {}).get("children", [])
+            payload = _fetch_listing_payload(hot)
+            children = (payload or {}).get("data", {}).get("children", [])
+            if children:
                 print(f"[reddit] r/{source.name}: top empty, using hot", file=sys.stderr)
-            except Exception:
-                pass
         for child in children:
             data = child.get("data") if isinstance(child, dict) else None
             if not isinstance(data, dict):
@@ -295,8 +427,11 @@ def pick_reddit_post(
         )
         candidates = list(_iter_candidates_public(sources))
     if not candidates:
+        if _should_use_topics_fallback():
+            return pick_topics_file_fallback(used_file=used_path)
         raise RuntimeError(
-            "No suitable Reddit text posts found. Check subreddit names or network access."
+            "No suitable Reddit text posts found. Check subreddit names, API secrets, "
+            "or add topics.txt for CI fallback."
         )
 
     random.shuffle(candidates)
@@ -323,7 +458,11 @@ def fetch_topic_for_pipeline(
     return post.topic_text, post.post_id
 
 
-def mark_post_used(post_id: str, used_file: Path) -> None:
+def mark_post_used(post_id: str, used_file: Path | None = None) -> None:
+    if post_id.startswith("topic:"):
+        used_file = Path(".github/used_topics.txt")
+    else:
+        used_file = used_file or Path(".github/used_reddit.txt")
     used_file.parent.mkdir(parents=True, exist_ok=True)
     if used_file.exists():
         existing = {
