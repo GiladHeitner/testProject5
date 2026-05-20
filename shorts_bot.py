@@ -201,7 +201,7 @@ def _confirm_script_interactive(script: str) -> bool:
 
 
 _OPENING_AT_START_THRESHOLD_SEC = 0.2
-_HOOK_END_PAD_SEC = 0.08
+_OPENING_POPUP_DURATION_SEC = 1.0
 
 
 def _first_sentence_from_script(script: str) -> str:
@@ -289,51 +289,13 @@ def _fetch_hook_stock_image(
     )
 
 
-def _resolve_hook_spoken_window(
-    phrase: str,
-    *,
-    narration_reference_segments: List[dict],
-    subtitle_segments: List[dict],
-    output_dir: Path,
-    find_spoken_window,
-) -> tuple[float, float] | None:
-    """Whisper/word-level timing for the hook phrase (prefer narration reference)."""
-    srt_word_segments: List[dict] = []
-    srt_path = output_dir / "subtitles.srt"
-    if srt_path.exists():
-        try:
-            srt_word_segments = read_srt_segments(srt_path)
-        except Exception as exc:
-            print(f"Could not read {srt_path}: {exc}")
-
-    sources: list[tuple[str, List[dict]]] = [
-        ("narration_whisper", narration_reference_segments),
-        ("subtitle_words", subtitle_segments),
-        ("subtitles_srt", srt_word_segments),
-    ]
-    for label, segments in sources:
-        if not segments:
-            continue
-        win = find_spoken_window(phrase, segments)
-        if win is not None:
-            print(
-                f"Hook spoken window ({label}): {win[0]:.2f}s -> {win[1]:.2f}s "
-                f"for {phrase!r}"
-            )
-            return win
-    return None
-
-
 def _ensure_opening_popup_at_start(
     popups: List[PopupImage],
     *,
     script: str,
     client: OpenAI | None,
     narration_duration: float,
-    subtitle_segments: List[dict],
-    narration_reference_segments: List[dict],
     output_dir: Path,
-    find_spoken_window,
 ) -> PopupImage | None:
     """Guarantee a popup at t=0 (opening hook). Caller assigns Discord SFX to it."""
     phrase = _first_sentence_from_script(script)
@@ -344,27 +306,8 @@ def _ensure_opening_popup_at_start(
         print("Opening popup: stock image fetch failed; skipping.")
         return None
 
-    tail = max(0.0, narration_duration - 0.05)
     start_sec = 0.0
-    win = _resolve_hook_spoken_window(
-        phrase,
-        narration_reference_segments=narration_reference_segments,
-        subtitle_segments=subtitle_segments,
-        output_dir=output_dir,
-        find_spoken_window=find_spoken_window,
-    )
-    if win is not None:
-        end_sec = min(tail, float(win[1]) + _HOOK_END_PAD_SEC)
-    else:
-        n_words = max(1, len(phrase.split()))
-        est_dur = n_words * 0.42 + 0.5
-        end_sec = min(tail, est_dur)
-        print(
-            f"Hook spoken window (estimate): {start_sec:.2f}s -> {end_sec:.2f}s "
-            f"for {phrase!r}"
-        )
-    if end_sec <= start_sec:
-        end_sec = min(tail, start_sec + 0.4)
+    end_sec = min(max(0.0, narration_duration - 0.05), _OPENING_POPUP_DURATION_SEC)
 
     at_start = [p for p in popups if p.start_sec < _OPENING_AT_START_THRESHOLD_SEC]
     width = 700
@@ -824,10 +767,7 @@ def main() -> None:
             script=script,
             client=client,
             narration_duration=narration_duration,
-            subtitle_segments=subtitle_segments,
-            narration_reference_segments=narration_reference_segments,
             output_dir=output_dir,
-            find_spoken_window=_find_spoken_window,
         )
     except Exception as exc:
         print(f"Opening popup failed: {exc}")
