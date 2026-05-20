@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scrape Reddit on your Mac → topics.txt → commit & push for GitHub Actions.
+# Scrape full Reddit posts on your Mac → topics.txt → commit & push for GitHub Actions.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
@@ -10,7 +10,11 @@ if [[ -d .venv ]]; then
 fi
 
 LIMIT="${LIMIT:-25}"
-python3 -m shorts_bot_lib.reddit_topics sync-topics --limit "$LIMIT" --out topics.txt
+EXTRA=()
+if [[ "${REPLACE:-0}" == "1" ]]; then
+  EXTRA+=(--replace)
+fi
+python3 -m shorts_bot_lib.reddit_topics sync-topics --limit "$LIMIT" --out topics.txt "${EXTRA[@]}"
 
 echo ""
 echo "Next: review topics.txt, then push to GitHub:"

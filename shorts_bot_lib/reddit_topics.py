@@ -59,6 +59,9 @@ DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
 MIN_SELFTEXT_CHARS = 80
 MIN_TITLE_CHARS = 100  # AskReddit etc. often have empty body but a long title
 MAX_TOPIC_CHARS = 12_000
+# Separates full Reddit posts in topics.txt (title + body for script generation)
+TOPICS_ENTRY_SEP = "\n---\n"
+MIN_TOPIC_ENTRY_CHARS = 80
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,38 @@ class RedditPost:
         if len(text) > MAX_TOPIC_CHARS:
             text = text[: MAX_TOPIC_CHARS - 3].rstrip() + "..."
         return text
+
+
+def topic_entry_id(text: str) -> str:
+    return f"topic:{hashlib.sha256(text.encode()).hexdigest()[:12]}"
+
+
+def load_topic_entries(topics_path: Path) -> list[str]:
+    """Load topics from topics.txt (--- separated full posts, or legacy one per line)."""
+    raw = topics_path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return []
+    if TOPICS_ENTRY_SEP in raw:
+        parts = raw.split(TOPICS_ENTRY_SEP)
+    else:
+        parts = raw.splitlines()
+    return [
+        p.strip()
+        for p in parts
+        if p.strip() and not p.strip().startswith("#")
+    ]
+
+
+def _topic_preview(text: str, max_len: int = 80) -> str:
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Reddit post from r/"):
+            continue
+        if len(line) > max_len:
+            return line[: max_len - 1] + "…"
+        return line
+    compact = text.replace("\n", " ")[:max_len]
+    return compact + ("…" if len(text) > max_len else "")
 
 
 def _load_used_ids(used_file: Path) -> set[str]:
@@ -209,22 +244,14 @@ def pick_topics_file_fallback(
         raise RuntimeError(f"Topics fallback file not found: {topics_path}")
     used_path = used_file or Path(".github/used_topics.txt")
     used_ids = _load_used_ids(used_path)
-    topics = [
-        line.strip()
-        for line in topics_path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    topics = load_topic_entries(topics_path)
     if not topics:
         raise RuntimeError(f"No topics in {topics_path}")
-    fresh = [
-        t
-        for t in topics
-        if f"topic:{hashlib.sha256(t.encode()).hexdigest()[:12]}" not in used_ids
-    ]
+    fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
     chosen = random.choice(pool)
-    post_id = f"topic:{hashlib.sha256(chosen.encode()).hexdigest()[:12]}"
-    print(f"[reddit] topics.txt fallback: {chosen[:72]!r}", file=sys.stderr)
+    post_id = topic_entry_id(chosen)
+    print(f"[reddit] topics.txt: {_topic_preview(chosen)!r}", file=sys.stderr)
     return RedditPost(
         post_id=post_id,
         subreddit="topics",
@@ -476,19 +503,6 @@ def pick_reddit_post(
     return chosen
 
 
-def post_to_topic_line(post: RedditPost) -> str:
-    """One-line topic for topics.txt (title hook, optional short body snippet)."""
-    title = post.title.replace("\n", " ").strip()
-    body = post.selftext.replace("\n", " ").strip()
-    line = title
-    if len(body) >= MIN_SELFTEXT_CHARS and len(title) < MIN_TITLE_CHARS:
-        snippet = body[:200].rsplit(" ", 1)[0] if len(body) > 200 else body
-        line = f"{title} — {snippet}"
-    if len(line) > 400:
-        line = line[:397].rstrip() + "..."
-    return line
-
-
 def collect_reddit_candidates(
     subreddits: list[str] | None = None,
     *,
@@ -522,9 +536,9 @@ def sync_topics_file(
     limit: int = 25,
     merge: bool = True,
     subreddits: list[str] | None = None,
-    min_line_len: int = 15,
+    min_entry_chars: int = MIN_TOPIC_ENTRY_CHARS,
 ) -> int:
-    """Scrape Reddit locally and write hooks into topics.txt for GitHub Actions."""
+    """Scrape Reddit locally; write full posts (title + body) into topics.txt for CI."""
     path = topics_file or Path(os.environ.get("TOPICS_FILE", "topics.txt"))
     posts = collect_reddit_candidates(subreddits)
     if not posts:
@@ -532,41 +546,38 @@ def sync_topics_file(
             "No Reddit posts fetched. Run on your Mac (not GitHub Actions) or add API keys."
         )
 
-    new_lines: list[str] = []
+    new_entries: list[str] = []
     for post in posts:
-        line = post_to_topic_line(post)
-        if len(line) >= min_line_len:
-            new_lines.append(line)
-        if len(new_lines) >= limit:
+        text = post.topic_text
+        if len(text) >= min_entry_chars:
+            new_entries.append(text)
+        if len(new_entries) >= limit:
             break
 
     existing: list[str] = []
     if merge and path.is_file():
-        existing = [
-            ln.strip()
-            for ln in path.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
+        existing = load_topic_entries(path)
 
-    seen_lower = {ln.lower() for ln in existing}
+    seen_ids = {topic_entry_id(t) for t in existing}
     added = 0
     combined = list(existing)
-    for line in new_lines:
-        if line.lower() in seen_lower:
+    for entry in new_entries:
+        eid = topic_entry_id(entry)
+        if eid in seen_ids:
             continue
-        combined.append(line)
-        seen_lower.add(line.lower())
+        combined.append(entry)
+        seen_ids.add(eid)
         added += 1
 
-    path.write_text("\n".join(combined) + "\n", encoding="utf-8")
+    path.write_text(TOPICS_ENTRY_SEP.join(combined) + "\n", encoding="utf-8")
     print(
-        f"topics.txt: {len(combined)} total, {added} new from Reddit → {path}",
+        f"topics.txt: {len(combined)} full posts, {added} new from Reddit → {path}",
         file=sys.stderr,
     )
-    for line in new_lines[:5]:
-        print(f"  • {line[:80]}{'…' if len(line) > 80 else ''}", file=sys.stderr)
-    if len(new_lines) > 5:
-        print(f"  … and {len(new_lines) - 5} more", file=sys.stderr)
+    for entry in new_entries[:5]:
+        print(f"  • {_topic_preview(entry)}", file=sys.stderr)
+    if len(new_entries) > 5:
+        print(f"  … and {len(new_entries) - 5} more", file=sys.stderr)
     return added
 
 
@@ -667,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sync = sub.add_parser(
         "sync-topics",
-        help="Scrape Reddit on your Mac and append hooks to topics.txt (commit & push for CI).",
+        help="Scrape full Reddit posts into topics.txt (commit & push for CI).",
     )
     sync.add_argument(
         "--out",
