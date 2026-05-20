@@ -85,48 +85,30 @@ jobs:
           echo "Sleeping for $DELAY seconds before generating..."
           sleep $DELAY
 
-      - name: Pick an unused topic
-        run: |
-          chmod +x ./run.sh
-          if [ ! -f topics.txt ]; then
-            echo "Missing topics.txt in repository root."
-            exit 1
-          fi
-          mkdir -p .github
-          USED_FILE=".github/used_topics.txt"
-          touch "$USED_FILE"
-          TOPIC="$(awk 'NF && $0 !~ /^[[:space:]]*#/' topics.txt | grep -Fvxf "$USED_FILE" | shuf -n 1)"
-          if [ -z "$TOPIC" ]; then
-            echo "All topics were used. Resetting used-topic history."
-            : > "$USED_FILE"
-            TOPIC="$(awk 'NF && $0 !~ /^[[:space:]]*#/' topics.txt | shuf -n 1)"
-          fi
-          if [ -z "$TOPIC" ]; then
-            echo "topics.txt is empty (or only comments/blank lines)."
-            exit 1
-          fi
-          echo "Selected topic: $TOPIC"
-          echo "TOPIC=$TOPIC" >> "$GITHUB_ENV"
-
       - name: Generate and upload short
         env:
+          CI: "true"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./run.sh --topic "$TOPIC" --dynamic-speed
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+        run: ./run.sh --reddit-topic
 
-      - name: Save used-topic state
+      - name: Save used Reddit post
         run: |
-          USED_FILE=".github/used_topics.txt"
-          grep -Fqx "$TOPIC" "$USED_FILE" || echo "$TOPIC" >> "$USED_FILE"
+          mkdir -p .github
+          USED_FILE=".github/used_reddit.txt"
+          touch "$USED_FILE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$USED_FILE"
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "chore: track used topic"
+          git commit -m "chore: track used Reddit post"
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git pull --rebase origin main || true

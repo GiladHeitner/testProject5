@@ -14,3 +14,4 @@ qwen-tts
 pydub
 faster-whisper
 pillow
+praw

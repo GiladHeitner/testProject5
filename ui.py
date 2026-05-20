@@ -88,6 +88,8 @@ def _build_cmd(payload: dict[str, Any]) -> list[str]:
 
     add_val("words", "--words")
     add_val("topic", "--topic")
+    add_val("topic_file", "--topic-file")
+    add_flag("reddit_topic", "--reddit-topic")
     add_val("tts", "--tts")
     add_val("privacy", "--privacy")
     add_val("duration_seconds", "--duration-seconds")
@@ -701,7 +703,10 @@ INDEX_HTML = r"""<!doctype html>
                 <input type="number" id="words" value="100" min="15" max="250">
                 <div class="hint">100 ≈ ~30s narrated.</div></div>
               <div class="field"><label>Topic (optional)</label>
-                <input type="text" id="topic" placeholder="e.g. people blasting speakerphone in public"></div>
+                <input type="text" id="topic" placeholder="Short topic, or leave empty"></div>
+              <div class="field"><div class="row-inline"><label>Use Reddit post as topic</label>
+                <label class="switch"><input type="checkbox" id="reddit_topic"><span class="slider"></span></label></div>
+                <div class="hint">Top posts from r/schoolrant, r/MiddleSchool, and r/teenagers (Rant flair only). No Reddit API keys required.</div></div>
             </div>
             <div class="sep"></div>
             <div class="field"><label>Custom script (optional)</label>
@@ -836,11 +841,11 @@ INDEX_HTML = r"""<!doctype html>
 
   // Inputs
   const inputIds = [
-    "words","topic","tts","privacy","duration_seconds","speed_ramp_ms","speed_slow","speed_fast",
+    "words","topic","topic_file","tts","privacy","duration_seconds","speed_ramp_ms","speed_slow","speed_fast",
     "popup_sfx_volume","popup_sfx_speed","popup_sfx_trim_seconds","bgm_path","bgm_volume",
     "gameplay_path","gameplay_top_crop",
     "script",
-    "dynamic_speed","generate_images","images_only","skip_tts","video_only","quick_test",
+    "dynamic_speed","generate_images","images_only","skip_tts","video_only","quick_test","reddit_topic",
     "no_description","no_popup_sfx","upload"
   ];
   function collect() {

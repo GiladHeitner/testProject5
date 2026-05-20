@@ -89,13 +89,17 @@ done
 
 has_topic=0
 for ((i=1; i<=$#; i++)); do
-  if [[ "${!i}" == "--topic" ]]; then
-    has_topic=1
-    break
-  fi
+  case "${!i}" in
+    --topic|--topic-file|--reddit-topic)
+      has_topic=1
+      break
+      ;;
+  esac
 done
 
-if [[ $is_quick_test -eq 0 && $has_topic -eq 0 && -t 0 ]]; then
+# Unattended: CI/GitHub Actions, or caller already passed a topic source.
+if [[ $is_quick_test -eq 0 && $has_topic -eq 0 && -t 0 \
+      && "${CI:-}" != "true" && -z "${GITHUB_ACTIONS:-}" ]]; then
   echo
   read -r -p "What's the topic? " entered_topic
   if [[ -n "${entered_topic// }" ]]; then

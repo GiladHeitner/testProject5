@@ -11,7 +11,10 @@ from .text import strip_script_markup, strip_wrapping_quotes
 
 
 SCRIPT_PROMPT_TEMPLATE = """
-this is the topic of a youtube shorts story: {topic_line} keep the topic as it is and continue the story Cater the story to a middle school audience but add non PG details.
+This is the source material for a YouTube Shorts story (often a full Reddit post). Use the title as the hook opening, then tell the story in first person based on the post. Cater to a middle school audience but add non-PG details.
+
+SOURCE:
+{topic_line}
 
 use this as example script follow the style:
 me and my friends actually invented our own secret language to pass notes. At first, we tried writing backwards, so if teachers or classmates tried to peak, they couldn't read it quickly. But then we realized if our notebooks ever got confiscated, it would still be easy to figure out. So, we went full spo. We created a whole alphabet, gave each letter its own symbol, and memorized it. Suddenly, we could write full conversations in class, and no one had a clue what we were saying. By high school, we didn't really use it anymore, but I still had all the symbols memorized. One day, I was in class journaling about a crush in the back of my notebook. I wasn't disrupting anyone, but my teacher noticed how into it I was and decided to call me out. He goes, "What are you writing a book over there?" >> Clearly, those aren't notes.

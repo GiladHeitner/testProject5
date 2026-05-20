@@ -1,0 +1,400 @@
+"""Fetch top weekly text posts from Reddit for Shorts topic input.
+
+Uses PRAW when REDDIT_CLIENT_ID/SECRET are set; otherwise public .json
+endpoints (no Reddit app required).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterator
+
+DEFAULT_SUBREDDITS = (
+    "schoolrant",
+    "MiddleSchool",
+    "teenagers",
+)
+
+
+@dataclass(frozen=True)
+class SubredditSource:
+    """How to list posts from one subreddit."""
+
+    name: str
+    kind: str = "top"  # top | hot | search
+    time_filter: str = "week"
+    search_query: str = ""
+    required_flair: str = ""
+    limit: int = 25
+
+
+DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
+    # top/week is empty on this small sub; hot has active rants
+    SubredditSource("schoolrant", kind="hot", limit=50),
+    SubredditSource("MiddleSchool", kind="top", time_filter="week", limit=50),
+    SubredditSource(
+        "teenagers",
+        kind="search",
+        search_query="flair:Rant",
+        time_filter="week",
+        required_flair="Rant",
+        limit=50,
+    ),
+)
+
+MIN_SELFTEXT_CHARS = 80
+MIN_TITLE_CHARS = 100  # AskReddit etc. often have empty body but a long title
+MAX_TOPIC_CHARS = 12_000
+
+
+@dataclass(frozen=True)
+class RedditPost:
+    post_id: str
+    subreddit: str
+    title: str
+    selftext: str
+    permalink: str
+    score: int
+
+    @property
+    def topic_text(self) -> str:
+        """Full post body for --topic / script generation."""
+        title = self.title.strip()
+        body = self.selftext.strip()
+        lines = [
+            f"Reddit post from r/{self.subreddit}:",
+            "",
+            title,
+            "",
+            body,
+        ]
+        text = "\n".join(lines).strip()
+        if len(text) > MAX_TOPIC_CHARS:
+            text = text[: MAX_TOPIC_CHARS - 3].rstrip() + "..."
+        return text
+
+
+def _load_used_ids(used_file: Path) -> set[str]:
+    if not used_file.exists():
+        return set()
+    return {
+        line.strip()
+        for line in used_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+
+def _user_agent() -> str:
+    return os.environ.get(
+        "REDDIT_USER_AGENT",
+        "VideoBots/1.0 (automated shorts topic picker)",
+    ).strip()
+
+
+def _has_praw_credentials() -> bool:
+    return bool(
+        os.environ.get("REDDIT_CLIENT_ID", "").strip()
+        and os.environ.get("REDDIT_CLIENT_SECRET", "").strip()
+    )
+
+
+def _reddit_client():
+    try:
+        import praw
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing `praw`. Install with: pip install praw"
+        ) from exc
+
+    return praw.Reddit(
+        client_id=os.environ["REDDIT_CLIENT_ID"].strip(),
+        client_secret=os.environ["REDDIT_CLIENT_SECRET"].strip(),
+        user_agent=_user_agent(),
+    )
+
+
+def _flair_matches(data: dict[str, Any], required: str) -> bool:
+    if not required:
+        return True
+    flair = (data.get("link_flair_text") or "").strip()
+    return flair.lower() == required.strip().lower()
+
+
+def _post_from_listing(
+    data: dict[str, Any],
+    *,
+    required_flair: str = "",
+) -> RedditPost | None:
+    if data.get("stickied"):
+        return None
+    if not _flair_matches(data, required_flair):
+        return None
+    selftext = (data.get("selftext") or "").strip()
+    title = (data.get("title") or "").strip()
+    if len(selftext) < MIN_SELFTEXT_CHARS and len(title) < MIN_TITLE_CHARS:
+        return None
+    if data.get("over_18"):
+        return None
+    if not title:
+        return None
+    permalink = data.get("permalink") or ""
+    if permalink and not permalink.startswith("http"):
+        permalink = f"https://reddit.com{permalink}"
+    sub = data.get("subreddit") or data.get("subreddit_name_prefixed", "").removeprefix("r/")
+    return RedditPost(
+        post_id=str(data.get("id") or ""),
+        subreddit=str(sub),
+        title=title,
+        selftext=selftext,
+        permalink=permalink,
+        score=int(data.get("score") or 0),
+    )
+
+
+def _resolve_sources(subreddits: list[str] | None) -> list[SubredditSource]:
+    if subreddits is None:
+        return list(DEFAULT_SOURCES)
+    by_name = {s.name.lower(): s for s in DEFAULT_SOURCES}
+    return [
+        by_name.get(name.lower(), SubredditSource(name))
+        for name in subreddits
+    ]
+
+
+def _listing_url(source: SubredditSource) -> str:
+    name = source.name
+    limit = source.limit
+    if source.kind == "search":
+        q = urllib.parse.quote(source.search_query)
+        return (
+            f"https://www.reddit.com/r/{name}/search.json"
+            f"?q={q}&restrict_sr=1&sort=top&t={source.time_filter}"
+            f"&limit={limit}&raw_json=1"
+        )
+    if source.kind == "hot":
+        return f"https://www.reddit.com/r/{name}/hot.json?limit={limit}&raw_json=1"
+    return (
+        f"https://www.reddit.com/r/{name}/top.json"
+        f"?t={source.time_filter}&limit={limit}&raw_json=1"
+    )
+
+
+def _submission_dict(submission) -> dict[str, Any]:
+    return {
+        "id": submission.id,
+        "subreddit": submission.subreddit.display_name,
+        "title": submission.title,
+        "selftext": submission.selftext,
+        "permalink": submission.permalink,
+        "score": submission.score,
+        "stickied": submission.stickied,
+        "over_18": submission.over_18,
+        "link_flair_text": getattr(submission, "link_flair_text", None),
+    }
+
+
+def _iter_submission_list(reddit, source: SubredditSource):
+    sub = reddit.subreddit(source.name)
+    if source.kind == "search":
+        return sub.search(
+            source.search_query,
+            sort="top",
+            time_filter=source.time_filter,
+            limit=source.limit,
+        )
+    if source.kind == "hot":
+        return sub.hot(limit=source.limit)
+    return sub.top(time_filter=source.time_filter, limit=source.limit)
+
+
+def _iter_candidates_public(sources: list[SubredditSource]) -> Iterator[RedditPost]:
+    for source in sources:
+        url = _listing_url(source)
+        req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                payload = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            print(
+                f"[reddit] skip r/{source.name} ({source.kind}): HTTP {exc.code}",
+                file=sys.stderr,
+            )
+            continue
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            print(f"[reddit] skip r/{source.name} (public): {exc}", file=sys.stderr)
+            continue
+        children = payload.get("data", {}).get("children", [])
+        if not children and source.kind == "top":
+            # e.g. r/schoolrant has no top/week posts — try hot
+            hot = SubredditSource(source.name, kind="hot", limit=source.limit)
+            try:
+                with urllib.request.urlopen(
+                    urllib.request.Request(
+                        _listing_url(hot), headers={"User-Agent": _user_agent()}
+                    ),
+                    timeout=30,
+                ) as resp:
+                    payload = json.load(resp)
+                children = payload.get("data", {}).get("children", [])
+                print(f"[reddit] r/{source.name}: top empty, using hot", file=sys.stderr)
+            except Exception:
+                pass
+        for child in children:
+            data = child.get("data") if isinstance(child, dict) else None
+            if not isinstance(data, dict):
+                continue
+            post = _post_from_listing(
+                data, required_flair=source.required_flair
+            )
+            if post and post.post_id:
+                yield post
+
+
+def _iter_candidates(reddit, sources: list[SubredditSource]) -> Iterator[RedditPost]:
+    for source in sources:
+        try:
+            for submission in _iter_submission_list(reddit, source):
+                post = _post_from_listing(
+                    _submission_dict(submission),
+                    required_flair=source.required_flair,
+                )
+                if post:
+                    yield post
+        except Exception as exc:
+            print(f"[reddit] skip r/{source.name}: {exc}", file=sys.stderr)
+
+
+def pick_reddit_post(
+    used_file: Path | None = None,
+    subreddits: list[str] | None = None,
+) -> RedditPost:
+    """Return one unused top-weekly text post from the configured subreddits."""
+    used_path = used_file or Path(".github/used_reddit.txt")
+    used_ids = _load_used_ids(used_path)
+    sources = _resolve_sources(
+        list(subreddits) if subreddits else None
+    )
+    random.shuffle(sources)
+
+    if _has_praw_credentials():
+        candidates = list(_iter_candidates(_reddit_client(), sources))
+    else:
+        print(
+            "[reddit] No API app credentials — using public JSON (no prefs/apps needed).",
+            file=sys.stderr,
+        )
+        candidates = list(_iter_candidates_public(sources))
+    if not candidates:
+        raise RuntimeError(
+            "No suitable Reddit text posts found. Check subreddit names or network access."
+        )
+
+    random.shuffle(candidates)
+    fresh = [p for p in candidates if p.post_id not in used_ids]
+    pool = fresh if fresh else candidates
+    pool.sort(key=lambda p: p.score, reverse=True)
+    # Pick from top-scored among unused (or all if everything was used).
+    top_n = min(8, len(pool))
+    chosen = random.choice(pool[:top_n])
+    print(
+        f"Reddit topic: r/{chosen.subreddit} | score={chosen.score} | "
+        f"{chosen.title[:72]!r}"
+    )
+    print(f"Permalink: {chosen.permalink}")
+    return chosen
+
+
+def fetch_topic_for_pipeline(
+    used_file: Path | None = None,
+    subreddits: list[str] | None = None,
+) -> tuple[str, str]:
+    """Return (topic_text, post_id) for the chosen Reddit submission."""
+    post = pick_reddit_post(used_file=used_file, subreddits=subreddits)
+    return post.topic_text, post.post_id
+
+
+def mark_post_used(post_id: str, used_file: Path) -> None:
+    used_file.parent.mkdir(parents=True, exist_ok=True)
+    if used_file.exists():
+        existing = {
+            ln.strip()
+            for ln in used_file.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        }
+        if post_id in existing:
+            return
+    with used_file.open("a", encoding="utf-8") as fh:
+        fh.write(f"{post_id}\n")
+
+
+def _cli_pick(args: argparse.Namespace) -> int:
+    used_file = Path(args.used)
+    out_file = Path(args.out)
+    id_file = Path(args.id_out) if args.id_out else None
+
+    subs = None
+    if args.subreddits:
+        subs = [s.strip() for s in re.split(r"[, ]+", args.subreddits) if s.strip()]
+
+    post = pick_reddit_post(used_file=used_file, subreddits=subs)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(post.topic_text, encoding="utf-8")
+    if id_file:
+        id_file.write_text(post.post_id, encoding="utf-8")
+    if args.mark_used:
+        mark_post_used(post.post_id, used_file)
+    print(f"Wrote topic ({len(post.topic_text)} chars) -> {out_file}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Pick a Reddit post for Shorts topic input.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    pick = sub.add_parser("pick", help="Fetch one top-weekly post and write topic text to a file.")
+    pick.add_argument(
+        "--used",
+        default=".github/used_reddit.txt",
+        help="File tracking used Reddit post IDs (one per line).",
+    )
+    pick.add_argument(
+        "--out",
+        default=".github/reddit_topic.txt",
+        help="Output file for full topic text (title + body).",
+    )
+    pick.add_argument(
+        "--id-out",
+        default=".github/reddit_post_id.txt",
+        help="Output file for the chosen post ID.",
+    )
+    pick.add_argument(
+        "--subreddits",
+        default="",
+        help=(
+            "Comma-separated subreddit names "
+            "(default: schoolrant,MiddleSchool,teenagers)."
+        ),
+    )
+    pick.add_argument(
+        "--mark-used",
+        action="store_true",
+        help="Append post ID to --used immediately after picking.",
+    )
+    pick.set_defaults(func=_cli_pick)
+
+    args = parser.parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

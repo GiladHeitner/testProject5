@@ -73,7 +73,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--topic",
         default="",
-        help="Optional rant topic, e.g. people blasting speakerphone in public",
+        help="Optional topic text (short prompt or full Reddit post body).",
+    )
+    parser.add_argument(
+        "--topic-file",
+        default="",
+        metavar="PATH",
+        help="Read topic from a file (used for long Reddit posts in CI).",
+    )
+    parser.add_argument(
+        "--reddit-topic",
+        action="store_true",
+        help="Fetch a top weekly text post from Reddit (PRAW) and use it as --topic.",
     )
     parser.add_argument(
         "--adam-cloner-script",
@@ -181,11 +192,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _confirm_script_interactive(script: str) -> bool:
+def _confirm_script_interactive(script: str, *, auto_accept: bool = False) -> bool:
     """Return True if the user accepted the script (Y/empty), False to regenerate."""
+    if auto_accept:
+        return True
+    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
+        return True
     interactive = (
         sys.stdin.isatty()
-        or os.environ.get("SHORTS_BOT_INTERACTIVE") == "1"
+        and os.environ.get("SHORTS_BOT_INTERACTIVE") == "1"
     )
     if not interactive:
         return True
@@ -545,6 +560,29 @@ def main() -> None:
     gemini_key = os.environ.get("GEMINI_API_KEY")
 
     project_root = Path.cwd()
+
+    if args.topic_file:
+        topic_path = Path(args.topic_file)
+        if not topic_path.is_absolute():
+            topic_path = project_root / topic_path
+        if not topic_path.exists():
+            raise FileNotFoundError(f"Topic file not found: {topic_path}")
+        args.topic = topic_path.read_text(encoding="utf-8").strip()
+    if args.reddit_topic:
+        from shorts_bot_lib.reddit_topics import fetch_topic_for_pipeline, mark_post_used
+
+        used_reddit = project_root / ".github" / "used_reddit.txt"
+        topic_text, post_id = fetch_topic_for_pipeline(used_file=used_reddit)
+        args.topic = topic_text
+        mark_post_used(post_id, used_reddit)
+        (project_root / ".github").mkdir(parents=True, exist_ok=True)
+        (project_root / ".github" / "reddit_post_id.txt").write_text(
+            post_id, encoding="utf-8"
+        )
+        (project_root / ".github" / "reddit_topic.txt").write_text(
+            topic_text, encoding="utf-8"
+        )
+
     gameplay_dir = project_root / "assets" / "gameplay"
     images_dir = project_root / "assets" / "popups"
     story_images_dir = project_root / "assets" / "story_images"
@@ -603,7 +641,10 @@ def main() -> None:
             print("\n--- Generated Script ---")
             print(clean_script)
             print("------------------------")
-            if _confirm_script_interactive(script):
+            if _confirm_script_interactive(
+                script,
+                auto_accept=bool(args.reddit_topic or args.topic_file),
+            ):
                 break
     script_file.write_text(script, encoding="utf-8")
 
