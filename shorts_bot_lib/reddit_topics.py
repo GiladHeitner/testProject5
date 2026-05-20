@@ -174,12 +174,27 @@ def _http_json(url: str, headers: dict[str, str], *, retries: int = 2) -> dict[s
     raise last_err  # type: ignore[misc]
 
 
+def _is_ci() -> bool:
+    return os.environ.get("CI") == "true" or bool(os.environ.get("GITHUB_ACTIONS"))
+
+
+def _use_topics_file_directly() -> bool:
+    """Skip Reddit HTTP in CI without API keys (datacenter IPs always get 403)."""
+    if os.environ.get("REDDIT_NO_TOPICS_FALLBACK") == "1":
+        return False
+    if os.environ.get("REDDIT_FORCE_PUBLIC") == "1":
+        return False
+    if _has_praw_credentials():
+        return False
+    return _is_ci()
+
+
 def _should_use_topics_fallback() -> bool:
     if os.environ.get("REDDIT_NO_TOPICS_FALLBACK") == "1":
         return False
     if os.environ.get("REDDIT_TOPICS_FALLBACK") == "1":
         return True
-    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
+    if _is_ci():
         return True
     return Path(os.environ.get("TOPICS_FILE", "topics.txt")).is_file()
 
@@ -418,17 +433,29 @@ def pick_reddit_post(
     )
     random.shuffle(sources)
 
+    if _use_topics_file_directly():
+        print(
+            "[reddit] CI without Reddit API keys — using topics.txt "
+            "(Reddit blocks GitHub Actions; set REDDIT_CLIENT_ID/SECRET to enable Reddit).",
+            file=sys.stderr,
+        )
+        return pick_topics_file_fallback()
+
     if _has_praw_credentials():
         candidates = list(_iter_candidates(_reddit_client(), sources))
     else:
         print(
-            "[reddit] No API app credentials — using public JSON (no prefs/apps needed).",
+            "[reddit] No API credentials — using public JSON (local/dev only).",
             file=sys.stderr,
         )
         candidates = list(_iter_candidates_public(sources))
     if not candidates:
         if _should_use_topics_fallback():
-            return pick_topics_file_fallback(used_file=used_path)
+            print(
+                "[reddit] Reddit unavailable — falling back to topics.txt.",
+                file=sys.stderr,
+            )
+            return pick_topics_file_fallback()
         raise RuntimeError(
             "No suitable Reddit text posts found. Check subreddit names, API secrets, "
             "or add topics.txt for CI fallback."
