@@ -23,6 +23,63 @@ def strip_script_markup(script_text: str) -> str:
     return cleaned
 
 
+_CONTRACTIONS = {
+    "I'M": "I'm",
+    "I'VE": "I've",
+    "I'LL": "I'll",
+    "I'D": "I'd",
+    "YOU'RE": "You're",
+    "YOU'VE": "You've",
+    "YOU'LL": "You'll",
+    "WE'RE": "We're",
+    "THEY'RE": "They're",
+    "CAN'T": "can't",
+    "WON'T": "won't",
+    "DON'T": "don't",
+    "DIDN'T": "didn't",
+    "ISN'T": "isn't",
+    "AREN'T": "aren't",
+}
+
+
+def _split_word_punctuation(word: str) -> tuple[str, str]:
+    m = re.match(r"^([^\w]*)([\w']+)([^\w]*)$", word, flags=re.UNICODE)
+    if not m:
+        return word, ""
+    return m.group(2), f"{m.group(1)}{m.group(3)}"
+
+
+def normalize_word_for_tts(word: str) -> str:
+    """Make one token safe for TTS (avoid spelling ALL CAPS letter-by-letter)."""
+    core, punct = _split_word_punctuation(word)
+    if not core:
+        return word
+    upper = core.upper()
+    if upper in _CONTRACTIONS:
+        return _CONTRACTIONS[upper] + punct
+    if core == "A":
+        return "a" + punct
+    letters = [c for c in core if c.isalpha()]
+    if len(letters) >= 3 and all(c.isupper() for c in letters):
+        return core.lower() + punct
+    if core.isupper() and len(core) >= 2 and core.isalpha():
+        return core.lower() + punct
+    return word
+
+
+def normalize_script_for_tts(script_text: str) -> str:
+    """Normal case + contractions for voice cloning/TTS (keeps script file unchanged)."""
+    cleaned = strip_script_markup(script_text)
+    lines = []
+    for line in cleaned.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        words = [normalize_word_for_tts(w) for w in line.split()]
+        lines.append(" ".join(words))
+    return "\n".join(lines) if len(lines) > 1 else (lines[0] if lines else "")
+
+
 def script_words_for_alignment(script_text: str) -> List[str]:
     cleaned = strip_script_markup(script_text).replace('"', " ")
     return [word for word in cleaned.split() if word]

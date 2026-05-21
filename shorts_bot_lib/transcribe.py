@@ -145,6 +145,35 @@ def build_caption_chunks_from_word_timestamps(
     return chunks
 
 
+def _words_from_script_alignment(script_text: str, audio_path: Path) -> List[Word]:
+    """Script words with timings from faster-whisper (fixes IDIOT -> ID I on screen)."""
+    whisper_words = transcribe_words(audio_path)
+    ts = [
+        {
+            "text": w.text,
+            "start": float(w.start),
+            "end": float(max(w.end, w.start + 0.05)),
+        }
+        for w in whisper_words
+    ]
+    chunks = build_caption_chunks_from_word_timestamps(
+        script_text, ts, words_per_chunk=1
+    )
+    out: List[Word] = []
+    for ch in chunks:
+        text = str(ch.get("raw_text", "")).strip()
+        if not text:
+            continue
+        out.append(
+            Word(
+                text=text,
+                start=float(ch["start"]),
+                end=float(ch["end"]),
+            )
+        )
+    return out
+
+
 def transcribe_audio_to_srt(
     client: OpenAI | None,
     audio_path: Path,
@@ -152,10 +181,14 @@ def transcribe_audio_to_srt(
     script_text: str = "",
     reference_segments: List[dict] | None = None,
 ) -> Tuple[List[dict], List[dict]]:
-    """Transcribe narration via faster-whisper and write subtitle files."""
-    del client, script_text, reference_segments
+    """Transcribe narration and write subtitle files."""
+    del client, reference_segments
 
-    words = transcribe_words(audio_path)
+    if script_text.strip():
+        words = _words_from_script_alignment(script_text, audio_path)
+    else:
+        words = transcribe_words(audio_path)
+
     word_segments = [
         {
             "start": float(word.start),

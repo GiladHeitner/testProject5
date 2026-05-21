@@ -12,7 +12,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from .runner import print_sub_progress, run
-from .text import strip_script_markup
+from .text import normalize_script_for_tts, strip_script_markup
 
 
 def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
@@ -62,7 +62,7 @@ def generate_voiceover_from_cloner_script(
     run_clone_path = _resolve_adam_cloner_script(project_root, cloner_script)
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
     env = os.environ.copy()
-    env["TEXT"] = strip_script_markup(script_text)
+    env["TEXT"] = normalize_script_for_tts(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -129,7 +129,7 @@ def generate_voiceover_from_cloner_script(
 
 
 def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_path: Path) -> None:
-    text = strip_script_markup(script_text)
+    text = normalize_script_for_tts(script_text)
     if not text:
         raise RuntimeError("Empty script text; cannot generate voiceover.")
     chunks = _split_for_tts(text)
