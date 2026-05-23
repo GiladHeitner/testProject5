@@ -720,8 +720,7 @@ INDEX_HTML = r"""<!doctype html>
                 <select id="tts"><option value="cloner">cloner (local Adam)</option><option value="openai">openai</option></select></div>
               <div class="field"><label>Background music</label>
                 <select id="bgm_path">
-                  <option value="assets/Chopin - Nocturne op.9 No.2.mp3">Chopin — Nocturne op.9 No.2</option>
-                  <option value="assets/undertale-fallen down but more comforting.mp3">Undertale — Fallen Down (comforting)</option>
+                  <option value="assets/BackgroundMusic.mp3">Background music</option>
                 </select></div>
               <div class="field"><label>BGM volume</label>
                 <input type="number" id="bgm_volume" step="0.01" value="0.25"></div>

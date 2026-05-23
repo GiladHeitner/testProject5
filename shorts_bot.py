@@ -146,7 +146,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Disable random popup sound effects. The opening popup still "
              "plays assets/discord-notification.mp3 when present.",
     )
-    parser.add_argument("--bgm-path", default="assets/Chopin - Nocturne op.9 No.2.mp3")
+    parser.add_argument("--bgm-path", default="assets/BackgroundMusic.mp3")
     parser.add_argument("--bgm-volume", type=float, default=0.08)
     parser.add_argument(
         "--gameplay-path",
