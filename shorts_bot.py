@@ -136,7 +136,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--video-only", action="store_true")
-    parser.add_argument("--popup-sfx", default="assets/sounds/vine-boom.mp3")
+    parser.add_argument("--popup-sfx", default="assets/sounds/mouse-click-sound.mp3")
     parser.add_argument("--popup-sfx-volume", type=float, default=0.55)
     parser.add_argument("--popup-sfx-speed", type=float, default=1.25)
     parser.add_argument("--popup-sfx-trim-seconds", type=float, default=1.4)

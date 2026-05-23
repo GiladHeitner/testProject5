@@ -11,6 +11,17 @@ from typing import List, Tuple
 
 from pydub import AudioSegment
 
+# Popup SFX pool (assets/sounds/*.mp3) — only these three are normalized and used.
+POPUP_SFX_NAMES = (
+    "mouse-click-sound.mp3",
+    "camera-flash-sound-effect.mp3",
+    "camera_zLdd1zp.mp3",
+)
+
+
+def popup_sfx_stems() -> set[str]:
+    return {Path(name).stem for name in POPUP_SFX_NAMES}
+
 
 def respeed(segment: AudioSegment, speed_factor: float, output_frame_rate: int) -> AudioSegment:
     new_sample_rate = max(1000, int(segment.frame_rate * speed_factor))
@@ -131,9 +142,14 @@ def ensure_normalized_sounds(src_dir: Path, dst_dir: Path) -> Path:
     if not src_dir.exists():
         return src_dir
     dst_dir.mkdir(parents=True, exist_ok=True)
-    audio_exts = {".mp3", ".wav", ".m4a", ".ogg"}
-    for src in sorted(src_dir.iterdir()):
-        if not src.is_file() or src.suffix.lower() not in audio_exts:
+    allowed = popup_sfx_stems()
+    for dst in dst_dir.iterdir():
+        if dst.is_file() and dst.stem not in allowed:
+            dst.unlink()
+            print(f"Removed stale normalized SFX: {dst.name}")
+    for name in POPUP_SFX_NAMES:
+        src = src_dir / name
+        if not src.is_file():
             continue
         dst = dst_dir / (src.stem + ".mp3")
         if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:

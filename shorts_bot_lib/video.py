@@ -75,15 +75,15 @@ def detect_content_crop(
 
 
 def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
+    from shorts_bot_lib.audio import POPUP_SFX_NAMES
+
     if not sounds_dir.exists():
         return
-    blocked_keywords = {"fahhh", "taco", "bell", "discord"}
-    all_sounds = sorted(
-        p for p in sounds_dir.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"}
-        and not any(kw in p.name.lower() for kw in blocked_keywords)
-    )
+    all_sounds = [
+        sounds_dir / (Path(name).stem + ".mp3")
+        for name in POPUP_SFX_NAMES
+        if (sounds_dir / (Path(name).stem + ".mp3")).exists()
+    ]
     if not all_sounds:
         return
     last_sfx: Path | None = None
@@ -349,13 +349,6 @@ def compose_video(
             if key not in seen_sfx:
                 seen_sfx.add(key)
                 unique_sfx_paths.append(popup.sfx_path)
-    if not unique_sfx_paths and popup_sfx_path is not None and popup_sfx_path.exists() and any(
-        p.play_sfx for p in popup_images
-    ):
-        unique_sfx_paths.append(popup_sfx_path)
-        for popup in popup_images:
-            if popup.play_sfx and popup.sfx_path is None:
-                popup.sfx_path = popup_sfx_path
     for sfx_path in unique_sfx_paths:
         input_parts.append(f"-i {shlex.quote(str(sfx_path))}")
         sfx_input_indices[str(sfx_path)] = len(input_parts) - 1
