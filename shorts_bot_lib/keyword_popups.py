@@ -26,6 +26,8 @@ KEYWORD_LLM_MODEL = os.environ.get("KEYWORD_LLM_MODEL", "gpt-4o-mini")
 # When the next keyword is spoken soon after this one, shorten this popup's
 # end (never its start) so both can appear; never shorter than this many seconds.
 _MIN_KEYWORD_VISIBLE_SEC = 0.28
+# Brief pause before the next popup (same on-screen slot).
+_POPUP_TIME_GAP_SEC = 0.06
 
 
 _KEYWORD_SYSTEM = (
@@ -148,7 +150,7 @@ def build_keyword_popups(
     popup_play_sfx: bool = True,
     target_count: int | None = None,
     popup_duration: float = 1.6,
-    min_gap: float = 0.0,
+    min_gap: float = _POPUP_TIME_GAP_SEC,
 ) -> tuple[List[PopupImage], List[dict]]:
     """Pick keywords and produce timed popups when each phrase is spoken."""
     out_dir.mkdir(parents=True, exist_ok=True)
