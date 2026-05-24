@@ -13,17 +13,17 @@ from typing import List
 from .runner import ffprobe_duration_seconds, run_ffmpeg_with_progress
 from .types import PopupImage
 
-# Gameplay files that should play at real-time speed (no 4x PTS ramp).
+# Gameplay files that should play at real-time speed (no 2x PTS ramp).
 _REALTIME_GAMEPLAY_FILENAMES = frozenset(
     {
         "2026-05-16 14-56-45.mov",
     }
 )
-_DEFAULT_GAMEPLAY_SPEED = 4.0
+_DEFAULT_GAMEPLAY_SPEED = 2.0
 
 
 def gameplay_speed_factor(gameplay_path: Path) -> float:
-    """Return source consumption multiplier: 4.0 = legacy 4x fast-forward, 1.0 = real-time."""
+    """Return source consumption multiplier: 2.0 = 2x fast-forward, 1.0 = real-time."""
     name = gameplay_path.name
     if name in _REALTIME_GAMEPLAY_FILENAMES:
         return 1.0
