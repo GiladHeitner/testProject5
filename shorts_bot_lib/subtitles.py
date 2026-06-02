@@ -32,6 +32,7 @@ def write_karaoke_block_ass(
     y: int = 520,
     font: str = "Gibson",
     font_size: int = 100,
+    rtl: bool = False,
 ) -> None:
     out_ass.parent.mkdir(parents=True, exist_ok=True)
     x = play_res_x // 2
@@ -53,7 +54,8 @@ Style: Default,{font},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    override = rf"{{\an8\pos({x},{y})\bord7\shad0\3c&H000000&\4c&H000000&}}"
+    rtl_tag = r"{\rtl1}" if rtl else ""
+    override = rf"{{\an8\pos({x},{y})\bord7\shad0\3c&H000000&\4c&H000000&}}{rtl_tag}"
     yellow = "&H0000FFFF&"
     white = "&H00FFFFFF&"
 

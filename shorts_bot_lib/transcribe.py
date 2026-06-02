@@ -19,6 +19,7 @@ def transcribe_words(
     model_name: str = "medium",
     device: str = "cpu",
     compute_type: str = "int8",
+    language: str | None = None,
 ) -> List[Word]:
     try:
         from faster_whisper import WhisperModel
@@ -28,11 +29,13 @@ def transcribe_words(
         ) from exc
 
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
-    segments, _info = model.transcribe(
-        str(audio_path),
-        word_timestamps=True,
-        vad_filter=True,
-    )
+    transcribe_kwargs = {
+        "word_timestamps": True,
+        "vad_filter": True,
+    }
+    if language:
+        transcribe_kwargs["language"] = language
+    segments, _info = model.transcribe(str(audio_path), **transcribe_kwargs)
 
     out: List[Word] = []
     for seg in segments:
@@ -88,7 +91,7 @@ def build_caption_chunks_from_word_timestamps(
         return []
 
     def norm(token: str) -> str:
-        return re.sub(r"[^a-z0-9]", "", token.lower())
+        return re.sub(r"[^\w]", "", token, flags=re.UNICODE).lower()
 
     script_norm = [norm(word) for word in clean_script]
     whisper_norm = [norm(str(word.get("text", ""))) for word in word_timestamps]
@@ -145,9 +148,11 @@ def build_caption_chunks_from_word_timestamps(
     return chunks
 
 
-def _words_from_script_alignment(script_text: str, audio_path: Path) -> List[Word]:
+def _words_from_script_alignment(
+    script_text: str, audio_path: Path, *, language: str | None = None
+) -> List[Word]:
     """Script words with timings from faster-whisper (fixes IDIOT -> ID I on screen)."""
-    whisper_words = transcribe_words(audio_path)
+    whisper_words = transcribe_words(audio_path, language=language)
     ts = [
         {
             "text": w.text,
@@ -180,14 +185,19 @@ def transcribe_audio_to_srt(
     out_srt_path: Path,
     script_text: str = "",
     reference_segments: List[dict] | None = None,
+    *,
+    language: str | None = None,
+    subtitle_font: str = "Gibson",
+    subtitle_rtl: bool = False,
+    subtitle_uppercase_ratio: float = 0.15,
 ) -> Tuple[List[dict], List[dict]]:
     """Transcribe narration and write subtitle files."""
     del client, reference_segments
 
     if script_text.strip():
-        words = _words_from_script_alignment(script_text, audio_path)
+        words = _words_from_script_alignment(script_text, audio_path, language=language)
     else:
-        words = transcribe_words(audio_path)
+        words = transcribe_words(audio_path, language=language)
 
     word_segments = [
         {
@@ -203,7 +213,13 @@ def transcribe_audio_to_srt(
         raise RuntimeError("No transcription segments returned; cannot build subtitles.")
 
     if out_srt_path.suffix.lower() == ".ass":
-        write_karaoke_block_ass(words, out_srt_path)
+        write_karaoke_block_ass(
+            words,
+            out_srt_path,
+            font=subtitle_font,
+            rtl=subtitle_rtl,
+            uppercase_ratio=subtitle_uppercase_ratio,
+        )
         write_srt_from_segments(word_segments, out_srt_path.with_suffix(".srt"))
     else:
         write_srt_from_segments(word_segments, out_srt_path)

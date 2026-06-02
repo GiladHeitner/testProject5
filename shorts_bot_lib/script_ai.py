@@ -69,6 +69,64 @@ Licensed under Creative Commons Attribution.
 Output ONLY the description, nothing else."""
 
 
+TITLE_PROMPT_AR = """Create a viral YouTube Shorts TITLE in Arabic for this story.
+
+Rules:
+- Arabic only
+- 55–80 characters
+- curiosity-driven
+- use 1–2 emojis
+- include #shorts and 1–2 relevant Arabic hashtags
+
+Output ONLY the title, nothing else."""
+
+
+DESCRIPTION_PROMPT_AR = """Create a viral YouTube Shorts DESCRIPTION in Arabic for this story.
+
+Rules:
+- Arabic only
+- 1 short line summarizing the story
+- conversational tone
+- encourage engagement
+- include relevant hashtags
+- end with this exact English credit block:
+
+Gameplay Credit: Dope Gameplays
+Roblox Parkour Gameplay No Copyright | Roblox Gameplay No Copyright | 33
+https://www.youtube.com/shorts/8Vo-3dhM7lM
+Licensed under Creative Commons Attribution.
+
+Output ONLY the description, nothing else."""
+
+
+TRANSLATE_TO_ARABIC_PROMPT = """Translate this YouTube Shorts narration script into natural spoken Arabic for teens.
+
+Rules:
+- First-person storytelling, casual and authentic
+- Preserve the same story beats, intensity, and profanity level
+- Keep every --word-- marker with exactly ONE Arabic word inside each pair
+- Space --markers-- evenly; never back-to-back
+- End with an Arabic subscribe/banned CTA matching the original intent
+- Present tense
+- Plain narration only: no stage directions, emojis, or labels
+- Output Arabic text only"""
+
+
+def translate_story_to_arabic(client: OpenAI, script: str) -> str:
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": TRANSLATE_TO_ARABIC_PROMPT},
+            {"role": "user", "content": script.strip()},
+        ],
+        temperature=0.4,
+    )
+    translated = (resp.choices[0].message.content or "").strip()
+    if not translated:
+        raise RuntimeError("Arabic translation returned empty text.")
+    return translated
+
+
 def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
     topic_line = topic.strip() or "a relatable personal story about a social situation"
     prompt = SCRIPT_PROMPT_TEMPLATE.format(topic_line=topic_line)
@@ -80,7 +138,11 @@ def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
     return resp.output_text.strip()
 
 
-def generate_metadata(client: OpenAI, script: str, include_description: bool = True) -> Tuple[str, str]:
+def generate_metadata(
+    client: OpenAI, script: str, include_description: bool = True, *, language: str = "en"
+) -> Tuple[str, str]:
+    title_prompt = TITLE_PROMPT_AR if language == "ar" else TITLE_PROMPT
+    desc_prompt = DESCRIPTION_PROMPT_AR if language == "ar" else DESCRIPTION_PROMPT
     def _call(prompt: str) -> str:
         r = client.chat.completions.create(
             model="gpt-4o",
@@ -89,8 +151,8 @@ def generate_metadata(client: OpenAI, script: str, include_description: bool = T
         )
         return (r.choices[0].message.content or "").strip()
 
-    title = strip_wrapping_quotes(_call(TITLE_PROMPT))
-    description = _call(DESCRIPTION_PROMPT) if include_description else ""
+    title = strip_wrapping_quotes(_call(title_prompt))
+    description = _call(desc_prompt) if include_description else ""
 
     if not title:
         hook = script.split(".")[0].strip()

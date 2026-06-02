@@ -110,6 +110,7 @@ fi
 cmd=(
   python shorts_bot.py
   --words "$WORDS"
+  --language arabic
   --gameplay-top-crop 96
   --bgm-volume 0.25
 )

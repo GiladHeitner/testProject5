@@ -42,8 +42,20 @@ _KEYWORD_SYSTEM = (
 )
 
 
+_KEYWORD_SYSTEM_AR = (
+    "You pick the most VISUAL, punchy Arabic phrases from a YouTube Shorts narration "
+    "script — words that benefit from being illustrated with a single still "
+    "image. Each pick must be a verbatim 1-4 word substring of the Arabic script, "
+    "and ideally a concrete noun, named entity, action, place, or object. "
+    "Skip filler and abstract words. "
+    "For each pick, also write a 2-4 word ENGLISH stock-photo / image search "
+    "query (visual nouns + adjectives only, no proper names, no verbs)."
+)
+
+
 def _normalize(text: str) -> str:
-    return re.sub(r"[^a-z0-9 ]+", " ", text.lower()).strip()
+    cleaned = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
 
 
 def _build_keyword_user_prompt(script_text: str, target_count: int) -> str:
@@ -60,16 +72,17 @@ def _build_keyword_user_prompt(script_text: str, target_count: int) -> str:
 
 
 def extract_keywords(
-    client: OpenAI, script_text: str, target_count: int
+    client: OpenAI, script_text: str, target_count: int, *, language: str = "en"
 ) -> List[dict]:
     user_prompt = _build_keyword_user_prompt(script_text, target_count)
+    system_prompt = _KEYWORD_SYSTEM_AR if language == "ar" else _KEYWORD_SYSTEM
 
     def _call() -> str:
         resp = client.chat.completions.create(
             model=KEYWORD_LLM_MODEL,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": _KEYWORD_SYSTEM},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.4,
@@ -151,6 +164,7 @@ def build_keyword_popups(
     target_count: int | None = None,
     popup_duration: float = 1.6,
     min_gap: float = _POPUP_TIME_GAP_SEC,
+    language: str = "en",
 ) -> tuple[List[PopupImage], List[dict]]:
     """Pick keywords and produce timed popups when each phrase is spoken."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +177,7 @@ def build_keyword_popups(
         target_count = max(6, int(round(narration_duration * 0.6)))
     print(f"Picking ~{target_count} keyword popups for {narration_duration:.1f}s narration...")
 
-    keywords = extract_keywords(client, script_text, target_count)
+    keywords = extract_keywords(client, script_text, target_count, language=language)
     if not keywords:
         print("Keyword extraction returned nothing; no keyword popups.")
         return [], []

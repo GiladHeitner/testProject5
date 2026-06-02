@@ -9,7 +9,7 @@ from typing import List
 
 
 def normalize_word_token(value: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", value.lower())
+    return re.sub(r"[^\w]", "", value, flags=re.UNICODE).lower()
 
 
 def strip_script_markup(script_text: str) -> str:
