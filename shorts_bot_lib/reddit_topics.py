@@ -32,13 +32,15 @@ DEFAULT_SUBREDDITS = (
     "hijabis",
     "muslim",
     "arabs",
+    "ArabWorld",
 )
 
 # Prefer topics that match high-performing angles on this channel.
 _PRIORITY_NICHE_KEYWORDS = re.compile(
     r"hijab|islamophob|against arabs?|terrorist|muslim hate|arab hate|"
     r"ramadan|picture day|group chat|yearbook|mosque|airport|tsa|halal|"
-    r"arranged|cousin|convert|hate crime",
+    r"arranged|cousin|convert|hate crime|iftar|suhoor|fasting|eid|"
+    r"diaspora|desi|abaya|prayer|imam|profiling",
     re.IGNORECASE,
 )
 
@@ -59,7 +61,10 @@ _MUSLIM_ARAB_KEYWORDS = re.compile(
     r"muslim|moslem|islam|islamophob|anti[\s-]?muslim|anti[\s-]?arab|"
     r"hijab|niqab|burqa|hijabi|ramadan|eid|mosque|masjid|quran|koran|"
     r"arab|arabs|arabic|middle eastern|palestin|ummah|allah|halal|"
-    r"against arabs?|against muslims?|muslim hate|arab hate"
+    r"against arabs?|against muslims?|muslim hate|arab hate|"
+    r"desi|diaspora|iftar|suhoor|fasting|salah|prayer|imam|abaya|"
+    r"pakistani|lebanese|syrian|moroccan|egyptian|turkish|turk|"
+    r"yearbook.*hijab|hijab.*yearbook"
     r")\b",
     re.IGNORECASE,
 )
@@ -109,6 +114,7 @@ DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
     SubredditSource("hijabis", kind="hot", limit=40),
     SubredditSource("muslim", kind="hot", limit=40),
     SubredditSource("arabs", kind="hot", limit=40),
+    SubredditSource("ArabWorld", kind="hot", limit=30),
     SubredditSource(
         "teenagers",
         kind="search",
@@ -325,14 +331,12 @@ def pick_topics_file_fallback(
     if not topics:
         raise RuntimeError(f"No topics in {topics_path}")
     niche_topics = _filter_niche_topic_entries(topics)
-    if niche_topics:
-        topics = _rank_topics_by_priority(niche_topics)
-    else:
-        print(
-            "[reddit] No Muslim/Arab keyword matches in topics.txt; using full file.",
-            file=sys.stderr,
+    if not niche_topics:
+        raise RuntimeError(
+            f"No Muslim/Arab topics in {topics_path}. "
+            "Run sync_reddit_topics.sh locally or add niche posts to topics.txt."
         )
-        topics = _rank_topics_by_priority(topics)
+    topics = _rank_topics_by_priority(niche_topics)
     fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
     # Weighted pick: top-scored topics are more likely.
@@ -584,10 +588,16 @@ def pick_reddit_post(
             f"[reddit] {len(candidates)} Muslim/Arab niche post(s) after keyword filter.",
             file=sys.stderr,
         )
-    else:
+    elif _should_use_topics_fallback():
         print(
-            "[reddit] No Muslim/Arab keyword matches in Reddit results; using all candidates.",
+            "[reddit] No Muslim/Arab matches on Reddit — falling back to topics.txt.",
             file=sys.stderr,
+        )
+        return pick_topics_file_fallback(used_file=used_path)
+    else:
+        raise RuntimeError(
+            "No Muslim/Arab keyword matches in Reddit results. "
+            "Add topics.txt, set REDDIT_TOPICS_FALLBACK=1, or broaden subreddit sources."
         )
 
     random.shuffle(candidates)

@@ -101,7 +101,7 @@ done
 if [[ $is_quick_test -eq 0 && $has_topic -eq 0 && -t 0 \
       && "${CI:-}" != "true" && -z "${GITHUB_ACTIONS:-}" ]]; then
   echo
-  read -r -p "What's the topic? " entered_topic
+  read -r -p "Muslim/Arab teen story topic (or Enter for Reddit/default): " entered_topic
   if [[ -n "${entered_topic// }" ]]; then
     topic_arg=(--topic "$entered_topic")
   fi

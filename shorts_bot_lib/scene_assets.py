@@ -32,6 +32,7 @@ from .images import (
     _gemini_image_models,
 )
 from .image_judge import judge_image
+from .image_pipeline import fetch_image_to_path
 from .runner import print_sub_progress
 from .types import PopupImage
 
@@ -98,12 +99,12 @@ class Scene:
 
 
 _SCENE_SYSTEM = (
-    "You split a narration script into visual scenes for a YouTube Short. "
-    "Each scene gets a short stock-photo search query (2-5 words, nouns + "
-    "visual adjectives only, no proper names, no quotes, no punctuation, no "
-    "verbs). Create a NEW scene for every meaningful visual change, action, "
-    "subject, or location shift. Err on the side of MORE scenes, not fewer, "
-    "so the final video has constant fresh imagery."
+    "You split a Muslim/Arab teen storytime narration into visual scenes for a "
+    "YouTube Short. Each scene gets a short stock-photo search query (2-5 words, "
+    "nouns + visual adjectives only, no proper names, no quotes, no punctuation, "
+    "no verbs). Prefer culturally relevant visuals when the script mentions them "
+    "(hijab, mosque, halal food, airport security, family home, school, etc.). "
+    "Create a NEW scene for every meaningful visual change. Err on MORE scenes."
 )
 
 
@@ -355,7 +356,7 @@ def _fetch_scene_image(
     pexels_key: Optional[str],
     unsplash_key: Optional[str],
     gemini_key: Optional[str],  # accepted for compatibility; AI gen is disabled
-) -> Optional[Path]:
+) -> tuple[Optional[Path], Optional[str]]:
     base_name = f"scene_{scene.index:02d}_{scene.slug}"
     target_jpg = out_dir / f"{base_name}.jpg"
     expected = (
@@ -367,13 +368,26 @@ def _fetch_scene_image(
     best_score: int = -1
     best_label: str = ""
 
+    pipeline_path, pipeline_source = fetch_image_to_path(scene.query, target_jpg)
+    if pipeline_path is not None and pipeline_source:
+        print(f"   {pipeline_source:9} -> {target_jpg.name}")
+        verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
+        if verdict.ok:
+            return target_jpg, pipeline_source
+        print(f"   judge REJECT {pipeline_source} (score={verdict.score}): {verdict.reason}")
+        if verdict.score > best_score:
+            best_score = verdict.score
+            best_label = pipeline_source
+            best_path = out_dir / f"{base_name}_best_{pipeline_source}.jpg"
+            best_path.write_bytes(target_jpg.read_bytes())
+
     if pexels_key:
         url = _search_pexels(pexels_key, scene.query)
         if url and _download_image(url, target_jpg):
             print(f"   pexels    -> {target_jpg.name}")
             verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
             if verdict.ok:
-                return target_jpg
+                return target_jpg, "pexels"
             print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
             if verdict.score > best_score:
                 best_score = verdict.score
@@ -387,7 +401,7 @@ def _fetch_scene_image(
             print(f"   unsplash  -> {target_jpg.name}")
             verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
             if verdict.ok:
-                return target_jpg
+                return target_jpg, "unsplash"
             print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
             if verdict.score > best_score:
                 best_score = verdict.score
@@ -396,11 +410,11 @@ def _fetch_scene_image(
                 best_path.write_bytes(target_jpg.read_bytes())
 
     if best_path is not None:
-        print(f"   accept best stock from {best_label} (score={best_score})")
-        return best_path
+        print(f"   accept best from {best_label} (score={best_score})")
+        return best_path, best_label
 
     print(f"   FAILED to obtain image for scene {scene.index}")
-    return None
+    return None, None
 
 
 # --------------------------------------------------------------------------- #
@@ -480,7 +494,7 @@ def build_scene_popups(
     for idx, (scene, (start, end)) in enumerate(zip(scenes, windows), start=1):
         print_sub_progress(idx, total_scenes, f"Fetching scene image: {scene.query!r}")
         print(f"[{scene.index:02d}] query={scene.query!r}")
-        path = _fetch_scene_image(
+        path, img_source = _fetch_scene_image(
             scene=scene,
             out_dir=out_dir,
             openai_client=client,
@@ -502,7 +516,9 @@ def build_scene_popups(
             )
             continue
 
-        if path.name.endswith("_generated.png"):
+        if img_source:
+            source = img_source
+        elif path.name.endswith("_generated.png"):
             source = "gemini"
         elif path.name.endswith("_generated.jpg"):
             source = "openai"

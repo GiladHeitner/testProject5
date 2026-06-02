@@ -1,0 +1,79 @@
+name: YouTube Comment Replier
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 1 * * *"
+    - cron: "30 9 * * *"
+    - cron: "30 17 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  reply-to-comments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Materialize YouTube auth from secrets
+        env:
+          YT_CLIENT_SECRET_JSON: ${{ secrets.YT_CLIENT_SECRET_JSON }}
+          YT_TOKEN_JSON: ${{ secrets.YT_TOKEN_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$YT_CLIENT_SECRET_JSON" ] || [ -z "$YT_TOKEN_JSON" ] || [ -z "$OPENAI_API_KEY" ]; then
+            echo "Missing one or more required secrets: YT_CLIENT_SECRET_JSON, YT_TOKEN_JSON, OPENAI_API_KEY"
+            exit 1
+          fi
+          printf '%s' "$YT_CLIENT_SECRET_JSON" > client_secret.json
+          printf '%s' "$YT_TOKEN_JSON" > youtube_token.json
+          python -m json.tool client_secret.json >/dev/null
+          python -m json.tool youtube_token.json >/dev/null
+
+      - name: Reply to eligible comments
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COMMENT_REPLY_DRY_RUN: ${{ vars.COMMENT_REPLY_DRY_RUN }}
+        run: |
+          . .venv/bin/activate
+          mkdir -p .github
+          touch .github/replied_comments.txt .github/comment_reply_log.jsonl .github/upload_registry.jsonl
+          python -m shorts_bot_lib.comment_replier
+
+      - name: Commit reply state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/replied_comments.txt .github/comment_reply_log.jsonl
+          if git diff --cached --quiet; then
+            echo "No reply state changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: track YouTube comment replies"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git pull --rebase origin main || true
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push rejected, retrying ($attempt/5)..."
+            sleep 5
+          done
+          echo "Failed to push reply state after retries."
+          exit 1

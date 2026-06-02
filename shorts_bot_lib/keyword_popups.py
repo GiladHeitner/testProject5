@@ -23,12 +23,9 @@ from .types import PopupImage
 
 KEYWORD_LLM_MODEL = os.environ.get("KEYWORD_LLM_MODEL", "gpt-4o-mini")
 
-# When the next keyword is spoken soon after this one, shorten this popup's
-# end (never its start) so both can appear; never shorter than this many seconds.
-_MIN_KEYWORD_VISIBLE_SEC = 0.28
-# Brief pause before the next popup (same on-screen slot).
-_POPUP_TIME_GAP_SEC = 0.06
-
+POPUP_TARGET_SEC = float(os.environ.get("POPUP_TARGET_SEC", "2.0"))
+POPUP_GAP_SEC = float(os.environ.get("POPUP_GAP_SEC", "0.2"))
+POPUP_MIN_SEC = float(os.environ.get("POPUP_MIN_SEC", "0.4"))
 
 _KEYWORD_SYSTEM = (
     "You pick the most VISUAL, punchy phrases from a YouTube Shorts narration "
@@ -138,6 +135,40 @@ def _find_phrase_window(
     return None
 
 
+def _schedule_keyword_windows(
+    aligned: List[tuple[dict, float, float]],
+    narration_duration: float,
+    hook_end_sec: float,
+    *,
+    target_sec: float = POPUP_TARGET_SEC,
+    gap_sec: float = POPUP_GAP_SEC,
+    min_sec: float = POPUP_MIN_SEC,
+) -> List[tuple[dict, float, float]]:
+    """Schedule popups at phrase start; up to target_sec on screen with gap between."""
+    if not aligned:
+        return []
+    hook_cutoff = hook_end_sec + gap_sec
+    tail = max(0.1, narration_duration - 0.05)
+    sorted_aligned = sorted(aligned, key=lambda t: t[1])
+    accepted: List[tuple[dict, float, float]] = []
+
+    for i, (kw, phrase_start, _phrase_end) in enumerate(sorted_aligned):
+        s = phrase_start
+        if s < hook_cutoff:
+            print(f"  skip (hook overlap): {kw['phrase']!r} @ {s:.2f}s")
+            continue
+        if accepted and s < accepted[-1][2] + gap_sec:
+            print(f"  skip (gap): {kw['phrase']!r} @ {s:.2f}s")
+            continue
+        next_phrase_start = sorted_aligned[i + 1][1] if i + 1 < len(sorted_aligned) else tail
+        e = min(s + target_sec, next_phrase_start - gap_sec, tail)
+        if e - s < min_sec:
+            print(f"  skip (too short): {kw['phrase']!r} @ {s:.2f}s ({e - s:.2f}s)")
+            continue
+        accepted.append((kw, s, e))
+    return accepted
+
+
 def build_keyword_popups(
     *,
     client: OpenAI,
@@ -149,8 +180,10 @@ def build_keyword_popups(
     popup_y: int = 860,
     popup_play_sfx: bool = True,
     target_count: int | None = None,
-    popup_duration: float = 1.6,
-    min_gap: float = _POPUP_TIME_GAP_SEC,
+    hook_end_sec: float = 0.0,
+    popup_target_sec: float | None = None,
+    popup_gap_sec: float | None = None,
+    popup_min_sec: float | None = None,
 ) -> tuple[List[PopupImage], List[dict]]:
     """Pick keywords and produce timed popups when each phrase is spoken."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -169,49 +202,30 @@ def build_keyword_popups(
         return [], []
     print(f"Got {len(keywords)} keyword(s); aligning + fetching images...")
 
-    # Align phrases to timestamps, drop ones we can't time.
-    timed: List[tuple[dict, float, float]] = []
+    target_sec = popup_target_sec if popup_target_sec is not None else POPUP_TARGET_SEC
+    gap_sec = popup_gap_sec if popup_gap_sec is not None else POPUP_GAP_SEC
+    min_sec = popup_min_sec if popup_min_sec is not None else POPUP_MIN_SEC
+
+    aligned: List[tuple[dict, float, float]] = []
     for kw in keywords:
         win = _find_phrase_window(kw["phrase"], word_segments)
         if win is None:
             print(f"  skip (untimed): {kw['phrase']!r}")
             continue
-        start, end = win
-        # Center a fixed-duration popup around the phrase.
-        center = 0.5 * (start + end)
-        half = popup_duration / 2.0
-        s = max(0.0, center - half)
-        e = min(narration_duration - 0.05, center + half)
-        if e <= s:
-            continue
-        timed.append((kw, s, e))
+        phrase_start, phrase_end = win
+        aligned.append((kw, phrase_start, phrase_end))
 
-    if not timed:
+    spaced = _schedule_keyword_windows(
+        aligned,
+        narration_duration,
+        hook_end_sec,
+        target_sec=target_sec,
+        gap_sec=gap_sec,
+        min_sec=min_sec,
+    )
+    if not spaced:
+        print("No keyword popups survived scheduling.")
         return [], []
-
-    # Sort by start; trim each popup's end only when the next would start too soon
-    # (keeps each start tied to the spoken phrase; drops a keyword only if it
-    # cannot show at all after trimming).
-    timed.sort(key=lambda t: t[1])
-    spaced: List[tuple[dict, float, float]] = []
-    n = len(timed)
-    tail = narration_duration - 0.05
-    for i in range(n):
-        kw, s, e = timed[i]
-        if i + 1 < n:
-            s_next = timed[i + 1][1]
-            max_end = min(s_next - min_gap, tail)
-        else:
-            max_end = tail
-        e = min(e, max_end)
-        if e <= s:
-            continue
-        if e - s < _MIN_KEYWORD_VISIBLE_SEC:
-            stretched = min(s + _MIN_KEYWORD_VISIBLE_SEC, max_end)
-            if stretched <= s:
-                continue
-            e = stretched
-        spaced.append((kw, s, e))
 
     popups: List[PopupImage] = []
     mapping: List[dict] = []
@@ -223,7 +237,7 @@ def build_keyword_popups(
         scene = Scene(index=idx, text=kw["phrase"], query=kw["query"], word_count=1)
         print_sub_progress(idx, total_kw, f"Fetching popup image: {kw['phrase']!r}")
         print(f"[kw {idx:02d}] {kw['phrase']!r} -> query={kw['query']!r} ({s:.2f}-{e:.2f}s)")
-        path = _fetch_scene_image(
+        path, img_source = _fetch_scene_image(
             scene=scene,
             out_dir=out_dir,
             openai_client=client,
@@ -244,7 +258,9 @@ def build_keyword_popups(
             )
             continue
 
-        if path.name.endswith("_generated.png"):
+        if img_source:
+            source = img_source
+        elif path.name.endswith("_generated.png"):
             source = "gemini"
         elif path.name.endswith("_generated.jpg"):
             source = "openai"

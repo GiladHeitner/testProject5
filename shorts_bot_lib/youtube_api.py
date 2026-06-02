@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 from openai import OpenAI
 
 from .script_ai import generate_pinned_comment
+
+DEFAULT_UPLOAD_REGISTRY = Path(".github/upload_registry.jsonl")
+SCRIPT_EXCERPT_CHARS = 800
 
 
 _PINNED_COMMENT_FALLBACKS = [
@@ -168,3 +174,156 @@ def post_pinned_comment(
         print(f"Pinned comment: {comment_text}")
     except Exception as exc:
         print(f"Could not post pinned comment: {exc}")
+
+
+@dataclass(frozen=True)
+class VideoComment:
+    comment_id: str
+    video_id: str
+    author_channel_id: str
+    author_display_name: str
+    text: str
+    published_at: datetime
+
+
+def append_upload_registry(
+    video_id: str,
+    *,
+    title: str,
+    script: str,
+    registry_path: Path | None = None,
+) -> None:
+    """Append one upload record for the comment replier (JSONL)."""
+    path = registry_path or Path(
+        os.environ.get("UPLOAD_REGISTRY_FILE", str(DEFAULT_UPLOAD_REGISTRY))
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    excerpt = (script or "").strip().replace("\n", " ")[:SCRIPT_EXCERPT_CHARS]
+    row = {
+        "video_id": video_id,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "title": (title or "").strip(),
+        "script": excerpt,
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def load_upload_registry(
+    registry_path: Path | None = None,
+    *,
+    max_age_hours: float = 168.0,
+) -> list[dict[str, Any]]:
+    path = registry_path or Path(
+        os.environ.get("UPLOAD_REGISTRY_FILE", str(DEFAULT_UPLOAD_REGISTRY))
+    )
+    if not path.is_file():
+        return []
+    now = datetime.now(timezone.utc)
+    out: list[dict[str, Any]] = []
+    seen_videos: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        vid = str(row.get("video_id") or "").strip()
+        if not vid or vid in seen_videos:
+            continue
+        uploaded_raw = str(row.get("uploaded_at") or "")
+        try:
+            uploaded_at = datetime.fromisoformat(uploaded_raw.replace("Z", "+00:00"))
+        except ValueError:
+            uploaded_at = now
+        age_h = (now - uploaded_at).total_seconds() / 3600.0
+        if age_h > max_age_hours:
+            continue
+        seen_videos.add(vid)
+        out.append(row)
+    return out
+
+
+def build_youtube_client():
+    from googleapiclient.discovery import build
+
+    return build("youtube", "v3", credentials=get_youtube_credentials())
+
+
+def get_own_channel_id(youtube) -> str:
+    response = youtube.channels().list(part="id", mine=True).execute()
+    items = response.get("items") or []
+    if not items:
+        raise RuntimeError("Could not resolve authenticated YouTube channel id.")
+    return str(items[0]["id"])
+
+
+def _parse_youtube_datetime(value: str) -> datetime:
+    cleaned = (value or "").strip().replace("Z", "+00:00")
+    return datetime.fromisoformat(cleaned)
+
+
+def list_video_comments(
+    youtube,
+    video_id: str,
+    *,
+    max_results: int = 100,
+) -> list[VideoComment]:
+    """Top-level comments on a video (newest pages up to max_results)."""
+    comments: list[VideoComment] = []
+    page_token: str | None = None
+    while len(comments) < max_results:
+        batch = min(100, max_results - len(comments))
+        response = (
+            youtube.commentThreads()
+            .list(
+                part="snippet",
+                videoId=video_id,
+                maxResults=batch,
+                order="time",
+                pageToken=page_token,
+                textFormat="plainText",
+            )
+            .execute()
+        )
+        for item in response.get("items") or []:
+            snippet = item.get("snippet") or {}
+            top = snippet.get("topLevelComment") or {}
+            top_snip = top.get("snippet") or {}
+            comment_id = str(top.get("id") or "").strip()
+            if not comment_id:
+                continue
+            comments.append(
+                VideoComment(
+                    comment_id=comment_id,
+                    video_id=video_id,
+                    author_channel_id=str(top_snip.get("authorChannelId") or ""),
+                    author_display_name=str(top_snip.get("authorDisplayName") or ""),
+                    text=str(top_snip.get("textDisplay") or top_snip.get("textOriginal") or "").strip(),
+                    published_at=_parse_youtube_datetime(str(top_snip.get("publishedAt") or "")),
+                )
+            )
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+    return comments
+
+
+def post_comment_reply(youtube, parent_comment_id: str, text: str) -> str:
+    """Reply to a top-level comment; returns new reply comment id."""
+    response = (
+        youtube.comments()
+        .insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "parentId": parent_comment_id,
+                    "textOriginal": text[:240],
+                }
+            },
+        )
+        .execute()
+    )
+    return str(response.get("id") or "")

@@ -29,13 +29,13 @@ def build_hook_video_queries(
     """Produce 4-6 ranked stock-video search queries for the hook clip.
 
     The queries must depict the OVERALL TOPIC of the video (not just the
-    first sentence) — e.g. for a script about Napoleon's Russian campaign:
-    "snowy battlefield soldiers", "winter cavalry charge", "burning village smoke".
+    first sentence) — e.g. hijab conflict at school, airport profiling, Ramadan
+    fasting, family dinner, mosque, yearbook photo line.
     """
     fallback: List[str] = []
     if base_query:
         fallback.append(base_query.strip())
-    fallback.extend(["dramatic cinematic", "epic ancient history"])
+    fallback.extend(["teen hijab school", "airport security line", "family dinner table"])
     fallback = [q for q in dict.fromkeys(fallback) if q]
 
     if client is None:
@@ -50,14 +50,12 @@ def build_hook_video_queries(
                     "role": "system",
                     "content": (
                         "You generate stock-video search queries for the FIRST 1.5 seconds "
-                        "of a viral YouTube Short. The queries must produce a CINEMATIC, "
-                        "EYE-CATCHING, motion-rich clip that visually represents the "
-                        "OVERALL TOPIC of the video (the era, setting, environment, or "
-                        "central subject of the whole script — NOT just the first "
-                        "sentence). Use 2-4 visual words per query. Prefer concrete "
-                        "subjects and motion (e.g. 'roman legion marching', 'storm "
-                        "clouds rolling', 'sword clashing slow motion'). Avoid abstract "
-                        "nouns, names of people, and topical words like 'history'."
+                        "of a Muslim/Arab teen storytime YouTube Short. Queries must "
+                        "produce a CINEMATIC, eye-catching clip for the overall story "
+                        "(hijab at school, mosque, airport line, family kitchen, Ramadan, "
+                        "yearbook, etc. — NOT just the first sentence). Use 2-4 visual "
+                        "words per query. Prefer concrete motion (walking hallway, "
+                        "security scanner, dinner table). No proper names."
                     ),
                 },
                 {

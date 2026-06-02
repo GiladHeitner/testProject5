@@ -1,6 +1,6 @@
 # YouTube Shorts Story Bot (MVP)
 
-This bot generates a "crazy school story" short, adds subtitles, overlays popup images, and can upload to YouTube. test
+This bot generates Muslim/Arab teen storytime Shorts from Reddit or `topics.txt`, adds subtitles, popup images, and can upload to YouTube.
 
 ## What it does
 
@@ -36,6 +36,8 @@ This bot generates a "crazy school story" short, adds subtitles, overlays popup 
    - `OPENAI_API_KEY`
    - `ELEVENLABS_API_KEY`
    - Optional: `ELEVENLABS_VOICE_ID`
+   - Optional popup images: `PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY`, `PIXABAY_API_KEY` (vectors/graphics)
+   - Set `IMAGE_PIPELINE_DISABLED=1` to skip Pixabay/Met/Wikimedia and use stock APIs only
 
 3. Put gameplay clips in:
 

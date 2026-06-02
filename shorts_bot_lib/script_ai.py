@@ -19,8 +19,9 @@ SOURCE:
 {topic_line}
 
 use this as example script follow the style:
-me and my friends actually invented our own secret language to pass notes. At first, we tried writing backwards, so if teachers or classmates tried to peak, they couldn't read it quickly. But then we realized if our notebooks ever got confiscated, it would still be easy to figure out. So, we went full spo. We created a whole alphabet, gave each letter its own symbol, and memorized it. Suddenly, we could write full conversations in class, and no one had a clue what we were saying. By high school, we didn't really use it anymore, but I still had all the symbols memorized. One day, I was in class journaling about a crush in the back of my notebook. I wasn't disrupting anyone, but my teacher noticed how into it I was and decided to call me out. He goes, "What are you writing a book over there?" >> Clearly, those aren't notes.
->> I froze, snapped the notebook shut immediately. Thankfully, he just made his little joke and moved on. But there was no way I was about to risk my thoughts about this girl being read out loud to the whole class. So the next time I journaled, I switched back to the secret language. To everyone else, it looked like I was just doodling random symbols. But to me, it was the perfect cover. Fast forward years later, I find those old notebooks again. And the problem? I had thrown away the only translator we ever made, which means all the secrets I wrote as a kid are now locked away forever in a language even I don't understand anymore. Guys, what do I
+Why does my school want me to take off my hijab for picture day?
+
+I'm standing in the gym line and the photographer keeps saying "hair out, shoulders visible" like my hijab is a hat. I tell her it's religious and she goes "we need a standard look for the yearbook." My friends in line are getting annoyed because the bell is about to ring. I look at the sign that says SMILE and I feel my face getting hot. The vice principal walks over and whispers we can "do a private photo later" but I already know that means alone in his office with the door cracked. I say no. He says I'm making a scene. The whole line is staring. I grab my backpack and walk out before they can call my mom. Half the school is going to see a blank square where my face should be. Subscribe before I get --banned--!
 
 STYLE RULES (match these exactly):
 - PROFANITY: Swearing is allowed. If the source uses words like fuck/fucking/shit/hell, keep them — do NOT censor to freaking, heck, frick, etc.
@@ -78,8 +79,6 @@ Output ONLY the description, nothing else."""
 
 
 PINNED_COMMENT_PROMPT = """Write ONE YouTube pinned comment for this Muslim/Arab teen story Short.
-
-Rules:
 - 1-2 short sentences max
 - Ask a specific question about THIS exact story (school, hijab, family, racism, Ramadan, etc.)
 - Casual teen voice; at most one emoji
@@ -98,16 +97,20 @@ MUSLIM_SHORT_TAGS = (
     "islam",
     "hijab",
     "ramadan",
-    "teen story",
-    "school story",
-    "reddit story",
-    "islamophobia",
     "muslim teen",
+    "arab teen",
+    "islamophobia",
+    "diaspora",
+    "hijabi",
+    "reddit story",
 )
 
 
 def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
-    topic_line = topic.strip() or "a relatable personal story about a social situation"
+    topic_line = topic.strip() or (
+        "a Muslim or Arab teen dealing with hijab, Ramadan fasting at school, "
+        "islamophobia, family pressure, or diaspora identity"
+    )
     prompt = SCRIPT_PROMPT_TEMPLATE.format(topic_line=topic_line)
     resp = client.responses.create(
         model="gpt-4o",
@@ -131,6 +134,56 @@ def generate_pinned_comment(client: OpenAI, script: str) -> str:
     return text
 
 
+COMMENT_REPLY_PROMPT = """You are the creator of a Muslim/Arab teen storytime YouTube Short. Write ONE reply to a viewer comment.
+
+Rules:
+- 1-2 short sentences max, casual creator voice (yeah, honestly, ngl ok sometimes)
+- Reference the video story when relevant — not generic "thanks for watching"
+- Answer questions directly; be warm but real
+- No hashtags, no "subscribe", no "as a creator", no em dashes
+- If the comment is toxic, bait, spam, or you cannot reply naturally, output exactly: SKIP
+- Otherwise output ONLY the reply text (no quotes, no labels)
+
+VIDEO TITLE:
+{video_title}
+
+VIDEO STORY (context):
+{script}
+
+VIEWER COMMENT:
+{comment}
+"""
+
+
+def generate_comment_reply(
+    client: OpenAI,
+    *,
+    script: str,
+    video_title: str,
+    comment_text: str,
+    author_name: str = "",
+) -> str | None:
+    """Return reply text, or None if the model chose SKIP."""
+    user = COMMENT_REPLY_PROMPT.format(
+        video_title=(video_title or "Storytime short").strip(),
+        script=(script or "").strip()[:1200],
+        comment=(comment_text or "").strip(),
+    )
+    if author_name.strip():
+        user += f"\n\nCommenter display name: {author_name.strip()}"
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": user}],
+        temperature=0.9,
+    )
+    raw = (resp.choices[0].message.content or "").strip()
+    if not raw or raw.upper() == "SKIP" or raw.upper().startswith("SKIP"):
+        return None
+    if len(raw) > 240:
+        raw = raw[:237].rstrip() + "..."
+    return raw
+
+
 def generate_metadata(client: OpenAI, script: str, include_description: bool = True) -> Tuple[str, str]:
     hook = extract_hook_text(script)
 
@@ -147,7 +200,7 @@ def generate_metadata(client: OpenAI, script: str, include_description: bool = T
 
     if not title:
         hook = script.split(".")[0].strip()
-        title = (hook[:82] + "...") if len(hook) > 85 else hook or "Crazy Story You Won't Believe"
+        title = (hook[:82] + "...") if len(hook) > 85 else hook or "Muslim Teen Story You Won't Believe 😭"
     if include_description and not description:
         description = (
             "Muslim & Arab teen stories every day.\n"
@@ -197,11 +250,10 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
     first_sentence = sentences[0] if sentences else cleaned[:200]
     fallback = (
-        "A hyper-saturated, surreal illustration of a middle school student "
-        "whose eyes are literally popping out of their head in shock. "
-        "Their phone screen is glowing intensely, casting a radioactive green "
-        "light on their face, and clearly displaying the giant, neon-pulsing "
-        "text \"CAUGHT!\". Explosive composition. Vertical 9:16."
+        "A hyper-saturated, surreal illustration of a teen girl in a hijab "
+        "whose eyes are literally popping out in shock at a school yearbook photo line. "
+        "A glowing sign reads \"REMOVE HIJAB\" in neon red. Explosive composition. "
+        "Vertical 9:16."
     )
     if client is None:
         return fallback

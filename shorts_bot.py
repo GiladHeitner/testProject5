@@ -58,6 +58,7 @@ from shorts_bot_lib.voiceover import (
     generate_voiceover_openai_tts,
 )
 from shorts_bot_lib.youtube_api import (
+    append_upload_registry,
     get_youtube_credentials,
     post_pinned_comment,
     upload_to_youtube,
@@ -216,7 +217,6 @@ def _confirm_script_interactive(script: str, *, auto_accept: bool = False) -> bo
     return False
 
 
-_OPENING_AT_START_THRESHOLD_SEC = 0.2
 _OPENING_POPUP_DURATION_SEC = 1.0
 
 
@@ -231,8 +231,10 @@ def _first_sentence_from_script(script: str) -> str:
 
 
 _HOOK_STOCK_QUERY_SYSTEM = (
-    "You write 2-4 word stock-photo search queries for YouTube Shorts hook images. "
-    "Use visual nouns and adjectives only — no proper names, no verbs, no quotes."
+    "You write 2-4 word stock-photo search queries for Muslim/Arab teen storytime "
+    "YouTube Shorts hook images (hijab, mosque, airport security, family dinner, "
+    "school hallway, yearbook, etc.). Use visual nouns and adjectives only — no "
+    "proper names, no verbs, no quotes."
 )
 
 
@@ -295,7 +297,7 @@ def _fetch_hook_stock_image(
         query=query,
         word_count=max(1, len(query.split())),
     )
-    return _fetch_scene_image(
+    path, _source = _fetch_scene_image(
         scene=scene,
         out_dir=output_dir / "hook_popup",
         openai_client=client,
@@ -303,6 +305,7 @@ def _fetch_hook_stock_image(
         unsplash_key=unsplash_key,
         gemini_key=os.environ.get("GEMINI_API_KEY"),
     )
+    return path
 
 
 def _ensure_opening_popup_at_start(
@@ -324,24 +327,11 @@ def _ensure_opening_popup_at_start(
 
     start_sec = 0.0
     end_sec = min(max(0.0, narration_duration - 0.05), _OPENING_POPUP_DURATION_SEC)
-
-    at_start = [p for p in popups if p.start_sec < _OPENING_AT_START_THRESHOLD_SEC]
     width = 700
-    if at_start:
-        opening = min(at_start, key=lambda p: p.start_sec)
-        opening.path = chosen
-        opening.start_sec = start_sec
-        opening.end_sec = end_sec
-        opening.play_sfx = True
-        print(
-            f"Opening popup at video start: {opening.path.name} "
-            f"(0.00s -> {opening.end_sec:.2f}s)"
-        )
-        return opening
 
     opening = PopupImage(
         path=chosen,
-        start_sec=0.0,
+        start_sec=start_sec,
         end_sec=end_sec,
         x=(1080 - width) // 2,
         y=860,
@@ -358,40 +348,26 @@ def _ensure_opening_popup_at_start(
     return opening
 
 
-def _apply_hook_popup_exclusivity(
+def _drop_hook_overlapping_popups(
     popups: List[PopupImage],
     opening: PopupImage,
+    *,
+    gap_sec: float = 0.2,
 ) -> List[PopupImage]:
-    """Keep only the opening popup visible during the hook window (Reddit-card behavior)."""
-    hook_end = float(opening.end_sec)
-    min_visible = 0.30
+    """Drop keyword popups that would overlap the opening hook window."""
+    hook_cutoff = float(opening.end_sec) + gap_sec
     kept: List[PopupImage] = []
     for popup in popups:
         if popup is opening:
             kept.append(popup)
             continue
-        if popup.end_sec <= hook_end + 0.05:
+        if popup.start_sec < hook_cutoff:
+            print(
+                f"Dropping keyword popup overlapping hook: "
+                f"{popup.path.name} @ {popup.start_sec:.2f}s"
+            )
             continue
-        if popup.start_sec < hook_end + 0.05:
-            new_start = hook_end + 0.05
-            if popup.end_sec - new_start < min_visible:
-                continue
-            popup.start_sec = new_start
         kept.append(popup)
-    kept.sort(key=lambda p: p.start_sec)
-
-    max_lead = 1.5
-    quick_resume = hook_end + 0.30
-    for popup in kept:
-        if popup is opening:
-            continue
-        if popup.start_sec - hook_end > max_lead:
-            delta = popup.start_sec - quick_resume
-            if delta > 0:
-                new_end = max(quick_resume + min_visible, popup.end_sec - delta)
-                popup.start_sec = quick_resume
-                popup.end_sec = new_end
-        break
     return kept
 
 
@@ -444,6 +420,7 @@ def _run_upload_only(
             _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
             video_id = video_url.split("v=")[-1]
             post_pinned_comment(_yt, video_id, script, client=client)
+            append_upload_registry(video_id, title=title, script=script)
         except Exception as exc:
             print(f"Could not post pinned comment: {exc}")
 
@@ -584,6 +561,16 @@ def main() -> None:
             topic_text, encoding="utf-8"
         )
 
+    if args.topic.strip() and not args.reddit_topic:
+        from shorts_bot_lib.reddit_topics import matches_muslim_arab_niche
+
+        if not matches_muslim_arab_niche(args.topic):
+            print(
+                "[topic] Warning: topic may not match Muslim/Arab niche — "
+                "script will still follow channel prompts.",
+                file=sys.stderr,
+            )
+
     gameplay_dir = project_root / "assets" / "gameplay"
     images_dir = project_root / "assets" / "popups"
     story_images_dir = project_root / "assets" / "story_images"
@@ -627,7 +614,7 @@ def main() -> None:
         if script_file.exists():
             script = script_file.read_text(encoding="utf-8").strip()
         else:
-            script = "Crazy School Story You Won't Believe"
+            script = "Muslim Teen Story You Won't Believe"
     elif provided_script:
         print_progress(step, total_steps, "Using custom script")
         script = provided_script
@@ -661,6 +648,10 @@ def main() -> None:
                 narration_file = raw_narration_file
             else:
                 raise RuntimeError("Missing output narration file for reuse mode.")
+        if client is not None:
+            narration_reference_segments = get_whisper_word_timestamps(
+                client, narration_file, script
+            )
     else:
         print_progress(step, total_steps, "Creating voiceover")
         raw_narration_file = output_dir / "narration_raw.mp3"
@@ -752,12 +743,25 @@ def main() -> None:
     popups: List[PopupImage] = []
     if not args.no_keyword_popups and client is not None and subtitle_segments:
         try:
+            keyword_word_segments = subtitle_segments
+            if narration_reference_segments:
+                keyword_word_segments = [
+                    {
+                        "text": str(s.get("text") or "").strip(),
+                        "raw_text": str(s.get("text") or "").strip(),
+                        "start": float(s["start"]),
+                        "end": float(max(float(s["end"]), float(s["start"]) + 0.05)),
+                    }
+                    for s in narration_reference_segments
+                    if str(s.get("text") or "").strip()
+                ]
             keyword_popups, keyword_mapping = build_keyword_popups(
                 client=client,
                 script_text=script,
-                word_segments=subtitle_segments,
+                word_segments=keyword_word_segments,
                 narration_duration=narration_duration,
                 out_dir=output_dir / "scene_assets",
+                hook_end_sec=_OPENING_POPUP_DURATION_SEC,
             )
             popups = keyword_popups
             if keyword_mapping:
@@ -816,7 +820,7 @@ def main() -> None:
 
     if opening_popup is not None:
         opening_popup.start_sec = 0.0
-        popups = _apply_hook_popup_exclusivity(popups, opening_popup)
+        popups = _drop_hook_overlapping_popups(popups, opening_popup)
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
@@ -875,7 +879,7 @@ def main() -> None:
     else:
         hook = script.split(".")[0].strip()
         title = (hook[:82] + "...") if len(hook) > 85 else hook
-        title = title or "Crazy School Story You Won't Believe"
+        title = title or "Muslim Teen Story You Won't Believe 😭 #shorts #muslim"
         description = "" if args.no_description else (
             "Subscribe for more storytime shorts!\n#shorts #storytime #schoolstory"
         )
@@ -924,6 +928,7 @@ def main() -> None:
         _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
         video_id = video_url.split("v=")[-1]
         post_pinned_comment(_yt, video_id, script, client=client)
+        append_upload_registry(video_id, title=title, script=script)
     else:
         print("Upload skipped. Run with --upload to publish.")
 

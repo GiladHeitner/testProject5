@@ -703,10 +703,10 @@ INDEX_HTML = r"""<!doctype html>
                 <input type="number" id="words" value="100" min="15" max="250">
                 <div class="hint">100 ≈ ~30s narrated.</div></div>
               <div class="field"><label>Topic (optional)</label>
-                <input type="text" id="topic" placeholder="Short topic, or leave empty"></div>
+                <input type="text" id="topic" placeholder="Muslim/Arab teen story topic, or leave empty"></div>
               <div class="field"><div class="row-inline"><label>Use Reddit post as topic</label>
                 <label class="switch"><input type="checkbox" id="reddit_topic"><span class="slider"></span></label></div>
-                <div class="hint">Top posts from r/schoolrant, r/MiddleSchool, and r/teenagers (Rant flair only). No Reddit API keys required.</div></div>
+                <div class="hint">Muslim/Arab niche posts from r/MuslimLounge, r/hijabis, r/arabs, r/teenagers (searched), etc. Falls back to topics.txt in CI.</div></div>
             </div>
             <div class="sep"></div>
             <div class="field"><label>Custom script (optional)</label>
