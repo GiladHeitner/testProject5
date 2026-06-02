@@ -20,7 +20,7 @@ def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
     text = text.strip()
     if not text:
         return []
-    sentences = re.split(r"(?<=[.!?؟…])\s+", text)
+    sentences = re.split(r"(?<=[.!?])\s+", text)
     chunks: list[str] = []
     current = ""
     for s in sentences:
@@ -57,12 +57,7 @@ def _resolve_adam_cloner_script(project_root: Path, configured_script: str) -> P
 
 
 def generate_voiceover_from_cloner_script(
-    script_text: str,
-    out_audio_path: Path,
-    project_root: Path,
-    cloner_script: str,
-    *,
-    language: str = "English",
+    script_text: str, out_audio_path: Path, project_root: Path, cloner_script: str
 ) -> None:
     run_clone_path = _resolve_adam_cloner_script(project_root, cloner_script)
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
@@ -70,7 +65,6 @@ def generate_voiceover_from_cloner_script(
     env["TEXT"] = normalize_script_for_tts(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
-    env["LANGUAGE"] = language
     env.setdefault("PYTHONUNBUFFERED", "1")
 
     # Heuristic phase markers — match common substrings emitted by huggingface

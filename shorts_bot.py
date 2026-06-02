@@ -37,12 +37,10 @@ from shorts_bot_lib.runner import (
     print_progress,
 )
 from shorts_bot_lib.keyword_popups import build_keyword_popups
-from shorts_bot_lib.locale import is_arabic_text, resolve_language
 from shorts_bot_lib.scene_assets import Scene, _fetch_scene_image, build_scene_popups
 from shorts_bot_lib.script_ai import (
     generate_metadata,
     generate_script,
-    translate_story_to_arabic,
 )
 from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
 from shorts_bot_lib.text import get_highlight_timestamps
@@ -71,12 +69,6 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (1024, _hard))
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate and upload YouTube Shorts automatically.")
-    parser.add_argument(
-        "--language",
-        default="",
-        help="Output language: english (default) or arabic. "
-             "Also reads SHORTS_BOT_LANGUAGE env (ar/arabic).",
-    )
     parser.add_argument("--words", type=int, default=70, help="Approx script word count (70 \u2248 18\u201324s narrated)")
     parser.add_argument(
         "--topic",
@@ -402,15 +394,6 @@ def _apply_hook_popup_exclusivity(
     return kept
 
 
-def _maybe_translate_script(script: str, client: OpenAI | None, language_code: str) -> str:
-    if language_code != "ar" or not script.strip() or is_arabic_text(script):
-        return script
-    if client is None:
-        raise RuntimeError("OpenAI client required to translate script to Arabic.")
-    print("Translating script to Arabic...")
-    return translate_story_to_arabic(client, script)
-
-
 def _run_upload_only(
     args: argparse.Namespace,
     client: OpenAI | None,
@@ -424,14 +407,13 @@ def _run_upload_only(
         )
     script_file = output_dir / "script.txt"
     script = script_file.read_text(encoding="utf-8").strip() if script_file.exists() else ""
-    lang = resolve_language(args.language)
 
     print_progress(1, 2, "Generating metadata")
     title = ""
     description = ""
     if client is not None and script:
         title, description = generate_metadata(
-            client, script, include_description=not args.no_description, language=lang.code
+            client, script, include_description=not args.no_description
         )
     if not title:
         hook = script.split(".")[0].strip() if script else ""
@@ -614,9 +596,6 @@ def main() -> None:
         get_youtube_credentials()
 
     client = OpenAI(api_key=api_key) if api_key else None
-    lang = resolve_language(args.language)
-    if lang.code == "ar":
-        print("Language: Arabic")
 
     if args.images_only:
         _run_images_only(args, client, gemini_key, output_dir)
@@ -667,7 +646,6 @@ def main() -> None:
                 auto_accept=bool(args.reddit_topic or args.topic_file),
             ):
                 break
-    script = _maybe_translate_script(script, client, lang.code)
     script_file.write_text(script, encoding="utf-8")
 
     # Step 2: voiceover
@@ -695,7 +673,6 @@ def main() -> None:
                 out_audio_path=raw_narration_file,
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
-                language=lang.tts_language,
             )
         if args.dynamic_speed and re.search(r"--([^-][\s\S]*?[^-])--", script):
             if client is None:
@@ -735,10 +712,6 @@ def main() -> None:
                 subtitle_file,
                 script_text=script,
                 reference_segments=narration_reference_segments or None,
-                language=lang.whisper_code,
-                subtitle_font=lang.subtitle_font,
-                subtitle_rtl=lang.rtl,
-                subtitle_uppercase_ratio=lang.uppercase_ratio,
             )  # type: ignore[arg-type]
         elif old_srt_file.exists():
             subtitle_segments = read_srt_segments(old_srt_file)
@@ -753,10 +726,6 @@ def main() -> None:
             subtitle_file,
             script_text=script,
             reference_segments=narration_reference_segments or None,
-            language=lang.whisper_code,
-            subtitle_font=lang.subtitle_font,
-            subtitle_rtl=lang.rtl,
-            subtitle_uppercase_ratio=lang.uppercase_ratio,
         )  # type: ignore[arg-type]
         emoji_events_file.write_text(json.dumps(generated_emoji_events), encoding="utf-8")
 
@@ -788,7 +757,6 @@ def main() -> None:
                 word_segments=subtitle_segments,
                 narration_duration=narration_duration,
                 out_dir=output_dir / "scene_assets",
-                language=lang.code,
             )
             popups = keyword_popups
             if keyword_mapping:
@@ -901,7 +869,7 @@ def main() -> None:
     print_progress(step, total_steps, "Generating metadata")
     if client is not None:
         title, description = generate_metadata(
-            client, script, include_description=not args.no_description, language=lang.code
+            client, script, include_description=not args.no_description
         )
     else:
         hook = script.split(".")[0].strip()
