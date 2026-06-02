@@ -685,9 +685,12 @@ def main() -> None:
     else:
         print_progress(step, total_steps, "Creating voiceover")
         raw_narration_file = output_dir / "narration_raw.mp3"
-        if args.tts == "openai":
+        use_openai_tts = args.tts == "openai" or lang.code == "ar"
+        if use_openai_tts:
             if client is None:
-                raise RuntimeError("OpenAI client missing; cannot use --tts openai.")
+                raise RuntimeError("OpenAI client missing; cannot use OpenAI TTS.")
+            if lang.code == "ar" and args.tts != "openai":
+                print("Using OpenAI TTS for Arabic (voice cloner does not support Arabic).")
             generate_voiceover_openai_tts(client, script, raw_narration_file)
         else:
             generate_voiceover_from_cloner_script(

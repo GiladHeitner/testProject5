@@ -152,7 +152,6 @@ def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_pa
                     model=model,
                     voice="alloy",
                     input=chunk_text,
-                    format="mp3",
                 )
                 return audio.read()
             except Exception as exc:
