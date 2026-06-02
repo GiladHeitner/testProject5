@@ -9,7 +9,7 @@ if [[ -d .venv ]]; then
   source .venv/bin/activate
 fi
 
-LIMIT="${LIMIT:-25}"
+LIMIT="${LIMIT:-40}"
 EXTRA=()
 if [[ "${REPLACE:-0}" == "1" ]]; then
   EXTRA+=(--replace)

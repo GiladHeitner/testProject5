@@ -39,6 +39,7 @@ from shorts_bot_lib.runner import (
 from shorts_bot_lib.keyword_popups import build_keyword_popups
 from shorts_bot_lib.scene_assets import Scene, _fetch_scene_image, build_scene_popups
 from shorts_bot_lib.script_ai import (
+    MUSLIM_SHORT_TAGS,
     generate_metadata,
     generate_script,
 )
@@ -422,7 +423,7 @@ def _run_upload_only(
         title = f"{title} #Shorts"
     if description and "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts"
-    tags = ["shorts", "storytime", "school story", "crazy story", "viral short"]
+    tags = list(MUSLIM_SHORT_TAGS)
     print(f"Title: {title}")
     print(f"Description: {description if description else '(empty)'}")
 
@@ -442,7 +443,7 @@ def _run_upload_only(
             from googleapiclient.discovery import build as _build
             _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
             video_id = video_url.split("v=")[-1]
-            post_pinned_comment(_yt, video_id, script)
+            post_pinned_comment(_yt, video_id, script, client=client)
         except Exception as exc:
             print(f"Could not post pinned comment: {exc}")
 
@@ -882,7 +883,7 @@ def main() -> None:
         title = f"{title} #Shorts"
     if description and "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts"
-    tags = ["shorts", "storytime", "school story", "crazy story", "viral short"]
+    tags = list(MUSLIM_SHORT_TAGS)
 
     metadata_file = output_dir / "metadata.txt"
     metadata_file.write_text(
@@ -922,7 +923,7 @@ def main() -> None:
         from googleapiclient.discovery import build as _build
         _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
         video_id = video_url.split("v=")[-1]
-        post_pinned_comment(_yt, video_id, script)
+        post_pinned_comment(_yt, video_id, script, client=client)
     else:
         print("Upload skipped. Run with --upload to publish.")
 

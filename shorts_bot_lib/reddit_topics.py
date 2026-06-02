@@ -29,7 +29,29 @@ DEFAULT_SUBREDDITS = (
     "MuslimLounge",
     "ABCDesis",
     "islam",
+    "hijabis",
+    "muslim",
+    "arabs",
 )
+
+# Prefer topics that match high-performing angles on this channel.
+_PRIORITY_NICHE_KEYWORDS = re.compile(
+    r"hijab|islamophob|against arabs?|terrorist|muslim hate|arab hate|"
+    r"ramadan|picture day|group chat|yearbook|mosque|airport|tsa|halal|"
+    r"arranged|cousin|convert|hate crime",
+    re.IGNORECASE,
+)
+
+
+def topic_priority_score(text: str) -> int:
+    score = 1 if matches_muslim_arab_niche(text) else 0
+    if _PRIORITY_NICHE_KEYWORDS.search(text or ""):
+        score += 10
+    return score
+
+
+def _rank_topics_by_priority(topics: list[str]) -> list[str]:
+    return sorted(topics, key=topic_priority_score, reverse=True)
 
 # Posts must match at least one keyword (title + body) for this channel niche.
 _MUSLIM_ARAB_KEYWORDS = re.compile(
@@ -84,6 +106,23 @@ DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
     SubredditSource("MuslimLounge", kind="hot", limit=50),
     SubredditSource("ABCDesis", kind="top", time_filter="month", limit=50),
     SubredditSource("islam", kind="top", time_filter="week", limit=40),
+    SubredditSource("hijabis", kind="hot", limit=40),
+    SubredditSource("muslim", kind="hot", limit=40),
+    SubredditSource("arabs", kind="hot", limit=40),
+    SubredditSource(
+        "teenagers",
+        kind="search",
+        search_query="islamophobic OR racial profiling OR airport security",
+        time_filter="year",
+        limit=50,
+    ),
+    SubredditSource(
+        "teenagers",
+        kind="search",
+        search_query="halal OR eid OR fasting at school",
+        time_filter="year",
+        limit=40,
+    ),
 )
 
 MIN_SELFTEXT_CHARS = 80
@@ -287,15 +326,19 @@ def pick_topics_file_fallback(
         raise RuntimeError(f"No topics in {topics_path}")
     niche_topics = _filter_niche_topic_entries(topics)
     if niche_topics:
-        topics = niche_topics
+        topics = _rank_topics_by_priority(niche_topics)
     else:
         print(
             "[reddit] No Muslim/Arab keyword matches in topics.txt; using full file.",
             file=sys.stderr,
         )
+        topics = _rank_topics_by_priority(topics)
     fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
-    chosen = random.choice(pool)
+    # Weighted pick: top-scored topics are more likely.
+    top = pool[: min(8, len(pool))]
+    weights = [max(1, topic_priority_score(t)) for t in top]
+    chosen = random.choices(top, weights=weights, k=1)[0]
     post_id = topic_entry_id(chosen)
     print(f"[reddit] topics.txt: {_topic_preview(chosen)!r}", file=sys.stderr)
     return RedditPost(
@@ -550,10 +593,11 @@ def pick_reddit_post(
     random.shuffle(candidates)
     fresh = [p for p in candidates if p.post_id not in used_ids]
     pool = fresh if fresh else candidates
-    pool.sort(key=lambda p: p.score, reverse=True)
-    # Pick from top-scored among unused (or all if everything was used).
+    pool.sort(key=lambda p: (topic_priority_score(p.topic_text), p.score), reverse=True)
     top_n = min(8, len(pool))
-    chosen = random.choice(pool[:top_n])
+    top = pool[:top_n]
+    weights = [max(1, topic_priority_score(p.topic_text)) for p in top]
+    chosen = random.choices(top, weights=weights, k=1)[0]
     print(
         f"Reddit topic: r/{chosen.subreddit} | score={chosen.score} | "
         f"{chosen.title[:72]!r}"

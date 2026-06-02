@@ -4,6 +4,10 @@ on:
   repository_dispatch:
     types: [trigger-shorts] # This is your custom "button" name
   workflow_dispatch:
+  schedule:
+    # ~10am PT and ~6pm PT (UTC); small jitter step below
+    - cron: "0 18 * * *"
+    - cron: "0 2 * * *"
 
 permissions:
   contents: write
@@ -27,7 +31,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg sox
+          sudo apt-get install -y ffmpeg sox fonts-dejavu-core
 
       - name: Install Python dependencies
         run: |
@@ -78,12 +82,12 @@ jobs:
           python -m json.tool youtube_token.json >/dev/null
           printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" > .env
 
-      - name: Random 30-minute delay
-        if: github.event_name != 'workflow_dispatch'
+      - name: Short jitter before generate
+        if: github.event_name == 'schedule'
         run: |
-          DELAY=$((RANDOM % 1800))
-          echo "Sleeping for $DELAY seconds before generating..."
-          sleep $DELAY
+          DELAY=$((RANDOM % 900))
+          echo "Sleeping ${DELAY}s (up to 15 min jitter)..."
+          sleep "$DELAY"
 
       - name: Generate and upload short
         env:

@@ -8,9 +8,12 @@ import time
 from pathlib import Path
 from typing import List
 
+from openai import OpenAI
 
-PINNED_COMMENTS = [
-    "Should we make a Part 2? \U0001F440",
+from .script_ai import generate_pinned_comment
+
+
+_PINNED_COMMENT_FALLBACKS = [
     "Which part hit different for you? Drop it below \U0001F447",
     "Who else has been through this?? \U0001F62D",
     "Tell me I'm not the only one \U0001F480",
@@ -130,8 +133,21 @@ def upload_to_youtube(
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
-def post_pinned_comment(youtube, video_id: str, script: str) -> None:
-    comment_text = random.choice(PINNED_COMMENTS)
+def post_pinned_comment(
+    youtube,
+    video_id: str,
+    script: str,
+    *,
+    client: OpenAI | None = None,
+) -> None:
+    comment_text: str | None = None
+    if client is not None and script.strip():
+        try:
+            comment_text = generate_pinned_comment(client, script)
+        except Exception as exc:
+            print(f"Pinned comment LLM failed, using fallback: {exc}")
+    if not comment_text:
+        comment_text = random.choice(_PINNED_COMMENT_FALLBACKS)
     try:
         response = youtube.commentThreads().insert(
             part="snippet",

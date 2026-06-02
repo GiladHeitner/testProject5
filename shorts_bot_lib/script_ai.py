@@ -27,6 +27,8 @@ STYLE RULES (match these exactly):
 - Match the source's intensity; rant posts should sound like real angry teens, not a cleaned-up school essay
 - Write in normal sentence case (not ALL CAPS). Use "I'm" not "I'M". TTS reads ALL CAPS letter-by-letter (IDIOT sounds like I-D-I-O-T).
 - Hook must be like a reddit post title after hook start a new paragraph
+- The FIRST sentence after the hook must be the same idea as the post title (viewer should recognize the title instantly)
+- Lean into conflict: discrimination, islamophobia, school rules, family pressure, "joke" racism, hijab, Ramadan, diaspora — not generic teen drama
 - End the video by saying subscribe before I get banned!
 - Must rehook the person throughout the video
 - DYNAMIC SPEED RAMPS: You MUST wrap 6 to 8 crucial action beats, plot twists, or heavy punchlines in double hyphens to trigger a slow-motion audio effect.
@@ -45,22 +47,26 @@ Write ONE complete script now.
 
 TITLE_PROMPT = """Create a viral YouTube Shorts TITLE for this story.
 
+The video hook (first spoken line) is:
+{hook}
+
 Rules:
+- Title MUST echo that hook / core conflict (question, shock, or "they made me...")
 - 55\u201380 characters
 - curiosity-driven
 - use 1\u20132 emojis like \U0001F62D\U0001F64F
-- include #shorts and 1\u20132 relevant hashtags (often #muslim #arab #islam #storytime when they fit)
+- include #shorts and 1\u20132 niche hashtags (#muslim #arab #hijab #islam #storytime — pick what fits)
 
 Output ONLY the title, nothing else."""
 
 
-DESCRIPTION_PROMPT = """Create a viral YouTube Shorts DESCRIPTION for this story.
+DESCRIPTION_PROMPT = """Create a viral YouTube Shorts DESCRIPTION for this Muslim/Arab teen story Short.
 
 Rules:
-- 1 short line summarizing the story
+- 2-3 short lines summarizing the story
 - conversational tone
-- encourage engagement
-- include relevant hashtags
+- ask one engagement question
+- include hashtags: #shorts #storytime #muslim #arab #islam #hijab #teenstory (and 2-3 more if relevant)
 - end with a copyright credit section exactly like this:
 
 Gameplay Credit: Dope Gameplays
@@ -69,6 +75,35 @@ https://www.youtube.com/shorts/8Vo-3dhM7lM
 Licensed under Creative Commons Attribution.
 
 Output ONLY the description, nothing else."""
+
+
+PINNED_COMMENT_PROMPT = """Write ONE YouTube pinned comment for this Muslim/Arab teen story Short.
+
+Rules:
+- 1-2 short sentences max
+- Ask a specific question about THIS exact story (school, hijab, family, racism, Ramadan, etc.)
+- Casual teen voice; at most one emoji
+- Good vibe: "Muslim teens — has a teacher ever done this to you?" or "Would you take off your hijab for a yearbook photo?"
+- Do NOT say "tag a friend" or generic engagement bait unrelated to the story
+- No hashtags
+
+Output ONLY the comment text."""
+
+
+MUSLIM_SHORT_TAGS = (
+    "shorts",
+    "storytime",
+    "muslim",
+    "arab",
+    "islam",
+    "hijab",
+    "ramadan",
+    "teen story",
+    "school story",
+    "reddit story",
+    "islamophobia",
+    "muslim teen",
+)
 
 
 def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
@@ -82,7 +117,23 @@ def generate_script(client: OpenAI, target_words: int, topic: str = "") -> str:
     return resp.output_text.strip()
 
 
+def generate_pinned_comment(client: OpenAI, script: str) -> str:
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "user", "content": f"{PINNED_COMMENT_PROMPT}\n\nSTORY:\n{script.strip()}"},
+        ],
+        temperature=0.8,
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    if not text:
+        raise RuntimeError("Pinned comment generation returned empty text.")
+    return text
+
+
 def generate_metadata(client: OpenAI, script: str, include_description: bool = True) -> Tuple[str, str]:
+    hook = extract_hook_text(script)
+
     def _call(prompt: str) -> str:
         r = client.chat.completions.create(
             model="gpt-4o",
@@ -91,14 +142,17 @@ def generate_metadata(client: OpenAI, script: str, include_description: bool = T
         )
         return (r.choices[0].message.content or "").strip()
 
-    title = strip_wrapping_quotes(_call(TITLE_PROMPT))
+    title = strip_wrapping_quotes(_call(TITLE_PROMPT.format(hook=hook)))
     description = _call(DESCRIPTION_PROMPT) if include_description else ""
 
     if not title:
         hook = script.split(".")[0].strip()
         title = (hook[:82] + "...") if len(hook) > 85 else hook or "Crazy Story You Won't Believe"
     if include_description and not description:
-        description = "Subscribe for more storytime shorts!\n#shorts #storytime"
+        description = (
+            "Muslim & Arab teen stories every day.\n"
+            "#shorts #storytime #muslim #arab #islam #hijab #teenstory"
+        )
     return title, description
 
 
