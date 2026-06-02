@@ -13,6 +13,8 @@ from .text import strip_script_markup, strip_wrapping_quotes
 SCRIPT_PROMPT_TEMPLATE = """
 This is the source material for a YouTube Shorts story (often a full Reddit post). Use the title as the hook opening, then tell the story in first person based on the post. Teen audience (middle/high school); keep it raw and authentic.
 
+This channel focuses on Muslim, Arab, and Middle Eastern teen stories — identity, family, faith, hijab, Ramadan, racism, islamophobia, diaspora life, etc. Stay respectful of the poster's perspective.
+
 SOURCE:
 {topic_line}
 
@@ -47,7 +49,7 @@ Rules:
 - 55\u201380 characters
 - curiosity-driven
 - use 1\u20132 emojis like \U0001F62D\U0001F64F
-- include #shorts and 1\u20132 relevant hashtags
+- include #shorts and 1\u20132 relevant hashtags (often #muslim #arab #islam #storytime when they fit)
 
 Output ONLY the title, nothing else."""
 

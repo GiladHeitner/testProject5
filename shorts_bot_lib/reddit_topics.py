@@ -25,10 +25,26 @@ from typing import Any, Iterator
 _OAUTH_TOKEN: str | None = None
 
 DEFAULT_SUBREDDITS = (
-    "schoolrant",
-    "MiddleSchool",
     "teenagers",
+    "MuslimLounge",
+    "ABCDesis",
+    "islam",
 )
+
+# Posts must match at least one keyword (title + body) for this channel niche.
+_MUSLIM_ARAB_KEYWORDS = re.compile(
+    r"\b("
+    r"muslim|moslem|islam|islamophob|anti[\s-]?muslim|anti[\s-]?arab|"
+    r"hijab|niqab|burqa|hijabi|ramadan|eid|mosque|masjid|quran|koran|"
+    r"arab|arabs|arabic|middle eastern|palestin|ummah|allah|halal|"
+    r"against arabs?|against muslims?|muslim hate|arab hate"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def matches_muslim_arab_niche(text: str) -> bool:
+    return bool(_MUSLIM_ARAB_KEYWORDS.search(text or ""))
 
 
 @dataclass(frozen=True)
@@ -44,16 +60,30 @@ class SubredditSource:
 
 
 DEFAULT_SOURCES: tuple[SubredditSource, ...] = (
-    # top/week is empty on this small sub; hot has active rants
-    SubredditSource("schoolrant", kind="hot", limit=50),
     SubredditSource(
         "teenagers",
         kind="search",
-        search_query="flair:Rant",
-        time_filter="week",
-        required_flair="Rant",
+        search_query="muslim OR hijab OR arab OR islamophobia",
+        time_filter="year",
+        limit=60,
+    ),
+    SubredditSource(
+        "teenagers",
+        kind="search",
+        search_query='"against arabs" OR "anti muslim" OR "muslim hate"',
+        time_filter="year",
+        limit=60,
+    ),
+    SubredditSource(
+        "teenagers",
+        kind="search",
+        search_query="ramadan OR mosque OR quran OR wearing hijab",
+        time_filter="year",
         limit=50,
     ),
+    SubredditSource("MuslimLounge", kind="hot", limit=50),
+    SubredditSource("ABCDesis", kind="top", time_filter="month", limit=50),
+    SubredditSource("islam", kind="top", time_filter="week", limit=40),
 )
 
 MIN_SELFTEXT_CHARS = 80
@@ -234,6 +264,14 @@ def _should_use_topics_fallback() -> bool:
     return Path(os.environ.get("TOPICS_FILE", "topics.txt")).is_file()
 
 
+def _filter_niche_posts(posts: list[RedditPost]) -> list[RedditPost]:
+    return [p for p in posts if matches_muslim_arab_niche(p.topic_text)]
+
+
+def _filter_niche_topic_entries(topics: list[str]) -> list[str]:
+    return [t for t in topics if matches_muslim_arab_niche(t)]
+
+
 def pick_topics_file_fallback(
     used_file: Path | None = None,
     topics_file: Path | None = None,
@@ -247,6 +285,14 @@ def pick_topics_file_fallback(
     topics = load_topic_entries(topics_path)
     if not topics:
         raise RuntimeError(f"No topics in {topics_path}")
+    niche_topics = _filter_niche_topic_entries(topics)
+    if niche_topics:
+        topics = niche_topics
+    else:
+        print(
+            "[reddit] No Muslim/Arab keyword matches in topics.txt; using full file.",
+            file=sys.stderr,
+        )
     fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
     chosen = random.choice(pool)
@@ -488,6 +534,19 @@ def pick_reddit_post(
             "or add topics.txt for CI fallback."
         )
 
+    niche = _filter_niche_posts(candidates)
+    if niche:
+        candidates = niche
+        print(
+            f"[reddit] {len(candidates)} Muslim/Arab niche post(s) after keyword filter.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[reddit] No Muslim/Arab keyword matches in Reddit results; using all candidates.",
+            file=sys.stderr,
+        )
+
     random.shuffle(candidates)
     fresh = [p for p in candidates if p.post_id not in used_ids]
     pool = fresh if fresh else candidates
@@ -549,7 +608,7 @@ def sync_topics_file(
     new_entries: list[str] = []
     for post in posts:
         text = post.topic_text
-        if len(text) >= min_entry_chars:
+        if len(text) >= min_entry_chars and matches_muslim_arab_niche(text):
             new_entries.append(text)
         if len(new_entries) >= limit:
             break
@@ -666,7 +725,7 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help=(
             "Comma-separated subreddit names "
-            "(default: schoolrant,MiddleSchool,teenagers)."
+            "(default: teenagers,MuslimLounge,ABCDesis,islam)."
         ),
     )
     pick.add_argument(
@@ -699,7 +758,7 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument(
         "--subreddits",
         default="",
-        help="Comma-separated subreddits (default: schoolrant,teenagers).",
+        help="Comma-separated subreddits (default: Muslim/Arab niche sources).",
     )
     sync.set_defaults(func=_cli_sync_topics)
 
