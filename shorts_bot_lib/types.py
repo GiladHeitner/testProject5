@@ -19,6 +19,7 @@ class PopupImage:
     is_emoji: bool = False
     sfx_path: Path | None = None
     preserve_aspect: bool = False
+    chroma_key: str | None = None  # e.g. "0x00FF00" for green-screen removal
 
 
 @dataclass(frozen=True)

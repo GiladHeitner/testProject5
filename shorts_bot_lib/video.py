@@ -227,22 +227,14 @@ def build_filter_complex(
             if (popup.is_emoji or popup.preserve_aspect)
             else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
         )
-        chains.append(
-            (
-                f"[{i + 2}:v]"
-                + scale_part
-                + f"format=rgba,"
-                  f"fade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f}:alpha=1"
-                  f"[img{i}]"
+        filters_after_scale = "format=rgba"
+        if popup.chroma_key:
+            filters_after_scale += f",colorkey={popup.chroma_key}:0.32:0.08"
+        if popup.use_fade:
+            filters_after_scale += (
+                f",fade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f}:alpha=1"
             )
-            if popup.use_fade
-            else (
-                f"[{i + 2}:v]"
-                + scale_part
-                + f"format=rgba"
-                  f"[img{i}]"
-            )
-        )
+        chains.append(f"[{i + 2}:v]{scale_part}{filters_after_scale}[img{i}]")
 
     current = base_video
     for i, popup in enumerate(popups, start=0):

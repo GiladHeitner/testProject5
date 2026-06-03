@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -10,6 +11,9 @@ from .runner import ffprobe_duration_seconds
 from .types import PopupImage
 
 DEFAULT_GIF = Path("assets/youtubebutton.gif")
+DEFAULT_CTA_WIDTH = int(os.environ.get("SUBSCRIBE_CTA_WIDTH", "920"))
+DEFAULT_CTA_Y = int(os.environ.get("SUBSCRIBE_CTA_Y", "780"))
+DEFAULT_CHROMA_KEY = os.environ.get("SUBSCRIBE_CTA_CHROMA", "0x00FF00")
 _SUBSCRIBE_PHRASES = (
     "subscribe before i get banned",
     "subscribe before",
@@ -62,8 +66,8 @@ def build_subscribe_cta_popup(
     word_segments: List[dict],
     narration_duration: float,
     gif_path: Path,
-    popup_width: int = 700,
-    popup_y: int = 860,
+    popup_width: int = DEFAULT_CTA_WIDTH,
+    popup_y: int = DEFAULT_CTA_Y,
 ) -> Optional[PopupImage]:
     """Build a visual-only subscribe GIF popup aligned to speech."""
     path = Path(gif_path)
@@ -95,6 +99,7 @@ def build_subscribe_cta_popup(
         use_fade=True,
         play_sfx=False,
         sfx_path=None,
+        chroma_key=DEFAULT_CHROMA_KEY or None,
     )
 
 
