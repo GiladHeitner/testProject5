@@ -20,6 +20,8 @@ from .runner import print_sub_progress
 from .scene_assets import Scene, _fetch_scene_image, _with_retries
 from .types import PopupImage
 
+_CTA_RESERVED_WORDS = frozenset({"subscribe", "banned"})
+
 
 KEYWORD_LLM_MODEL = os.environ.get("KEYWORD_LLM_MODEL", "gpt-4o-mini")
 
@@ -35,12 +37,28 @@ _KEYWORD_SYSTEM = (
     "(e.g. 'burning Moscow', 'cannon fire', 'snowy steppe', 'crown', "
     "'duel', 'flag'). Skip filler, conjunctions, and abstract words. "
     "For each pick, also write a 2-4 word stock-photo / image search "
-    "query (visual nouns + adjectives only, no proper names, no verbs)."
+    "query (visual nouns + adjectives only, no proper names, no verbs). "
+    "Never pick phrases containing subscribe or banned (handled by a "
+    "dedicated end-card overlay)."
 )
 
 
 def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", " ", text.lower()).strip()
+
+
+def _exclude_subscribe_keywords(keywords: List[dict]) -> List[dict]:
+    out: List[dict] = []
+    for entry in keywords:
+        phrase = _normalize(str(entry.get("phrase") or ""))
+        if not phrase:
+            continue
+        if set(phrase.split()) & _CTA_RESERVED_WORDS or any(
+            w in phrase for w in _CTA_RESERVED_WORDS
+        ):
+            continue
+        out.append(entry)
+    return out
 
 
 def _build_keyword_user_prompt(script_text: str, target_count: int) -> str:
@@ -196,7 +214,9 @@ def build_keyword_popups(
         target_count = max(6, int(round(narration_duration * 0.6)))
     print(f"Picking ~{target_count} keyword popups for {narration_duration:.1f}s narration...")
 
-    keywords = extract_keywords(client, script_text, target_count)
+    keywords = _exclude_subscribe_keywords(
+        extract_keywords(client, script_text, target_count)
+    )
     if not keywords:
         print("Keyword extraction returned nothing; no keyword popups.")
         return [], []

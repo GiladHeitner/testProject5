@@ -37,6 +37,7 @@ from shorts_bot_lib.runner import (
     print_progress,
 )
 from shorts_bot_lib.keyword_popups import build_keyword_popups
+from shorts_bot_lib.subscribe_cta import apply_subscribe_cta
 from shorts_bot_lib.scene_assets import Scene, _fetch_scene_image, build_scene_popups
 from shorts_bot_lib.script_ai import (
     MUSLIM_SHORT_TAGS,
@@ -171,6 +172,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--no-keyword-popups",
         action="store_true",
         help="Disable LLM-picked keyword popups timed to spoken phrases.",
+    )
+    parser.add_argument(
+        "--no-subscribe-cta",
+        action="store_true",
+        help="Disable the subscribe-button GIF overlay at the end of the script.",
     )
     parser.add_argument(
         "--no-fallback-popups",
@@ -804,6 +810,30 @@ def main() -> None:
         )
     if not popups and not args.no_fallback_popups:
         popups = choose_popup_images(images_dir, narration_duration, count=3)
+
+    if not args.no_subscribe_cta and subtitle_segments:
+        cta_word_segments: List[dict] = subtitle_segments
+        if narration_reference_segments:
+            cta_word_segments = [
+                {
+                    "text": str(s.get("text") or "").strip(),
+                    "raw_text": str(s.get("text") or "").strip(),
+                    "start": float(s["start"]),
+                    "end": float(max(float(s["end"]), float(s["start"]) + 0.05)),
+                }
+                for s in narration_reference_segments
+                if str(s.get("text") or "").strip()
+            ]
+        subscribe_gif = project_root / "assets" / "youtubebutton.gif"
+        if subscribe_gif.is_file():
+            popups = apply_subscribe_cta(
+                popups,
+                word_segments=cta_word_segments,
+                narration_duration=narration_duration,
+                gif_path=subscribe_gif,
+            )
+        else:
+            print(f"Subscribe CTA: GIF not found at {subscribe_gif}")
 
     # Opening hook popup at t=0; Discord notification SFX is wired to it below.
     opening_popup: PopupImage | None = None
