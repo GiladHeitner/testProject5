@@ -42,16 +42,18 @@ jobs:
           python -m pip install -r requirements.txt
 
       # Gameplay lives on Google Drive (not Git LFS) to avoid LFS bandwidth limits.
-      # Files: https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7 and .../1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p
       - name: Download gameplay from Google Drive
         run: |
           . .venv/bin/activate
           python -m pip install -q gdown
           mkdir -p assets/gameplay
-          gdown "https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7/view?usp=sharing" \
-            -O assets/gameplay/workflow_part00.mov
-          gdown "https://drive.google.com/file/d/1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p/view?usp=sharing" \
-            -O assets/gameplay/workflow_part01.mov
+          gdown "https://drive.google.com/file/d/1Pnu2sFDpScya5Odj070_pFYXyV61rKU3/view?usp=sharing" \
+            -O assets/gameplay/minecraft_parkour.mov
+          # Roblox (disabled for now — re-enable for random Minecraft/Roblox mix):
+          # gdown "https://drive.google.com/file/d/1MXK-sRRbqt0sHNFwCwkGVIESF_FJAuH7/view?usp=sharing" \
+          #   -O assets/gameplay/roblox_part00.mov
+          # gdown "https://drive.google.com/file/d/1oTBGA9dGH4jyGPJYqhWYj8b0mUYxYj7p/view?usp=sharing" \
+          #   -O assets/gameplay/roblox_part01.mov
           ls -lh assets/gameplay/
 
       - name: Cache Hugging Face model files
