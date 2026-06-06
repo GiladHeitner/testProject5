@@ -56,19 +56,19 @@ def cloner_reference_audio_path(project_root: Path) -> Path:
 
 
 def resolve_tts_engine(requested: str, project_root: Path) -> str:
-    """Pick cloner vs OpenAI; CI and missing reference wav use OpenAI."""
+    """Pick cloner vs OpenAI. CI always uses OpenAI (no Qwen/HuggingFace on Actions)."""
     engine = (requested or "cloner").strip().lower()
     if engine == "openai":
+        return "openai"
+    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
+        print(
+            "[tts] CI — using OpenAI TTS (Qwen cloner hits HF rate limits on Actions).",
+            flush=True,
+        )
         return "openai"
     ref = cloner_reference_audio_path(project_root)
     if ref.is_file():
         return "cloner"
-    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
-        print(
-            "[tts] CI has no Omar reference wav — using OpenAI TTS.",
-            flush=True,
-        )
-        return "openai"
     print(
         f"[tts] Reference audio missing ({ref.name}) — using OpenAI TTS.",
         flush=True,

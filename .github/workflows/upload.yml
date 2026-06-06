@@ -102,7 +102,7 @@ jobs:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
           WIKIMEDIA_USER_AGENT_CONTACT: ${{ secrets.WIKIMEDIA_USER_AGENT_CONTACT }}
-        run: ./run.sh --reddit-topic
+        run: ./run.sh --reddit-topic --tts openai
 
       - name: Save used topic
         run: |
