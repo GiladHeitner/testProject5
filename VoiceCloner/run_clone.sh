@@ -54,15 +54,21 @@ cleanup_ref() {
 }
 trap cleanup_ref EXIT
 
-QWEN_MODEL="${MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
-HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-MODEL_CACHE="$HF_CACHE/models--$(echo "$QWEN_MODEL" | tr '/' '--')"
-if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
+QWEN_MODEL_ID="${MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
+if [[ -n "${QWEN_MODEL_PATH:-}" && -d "$QWEN_MODEL_PATH" ]]; then
+  MODEL="$QWEN_MODEL_PATH"
+  echo "Using QWEN_MODEL_PATH: $MODEL"
+elif [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
+  MODEL_CACHE="$HF_CACHE/models--$(echo "$QWEN_MODEL_ID" | tr '/' '--')/snapshots"
   if [[ -d "$MODEL_CACHE" ]]; then
-    export HF_HUB_OFFLINE=1
-    export TRANSFORMERS_OFFLINE=1
-    echo "Using cached Qwen model offline: $QWEN_MODEL"
+    MODEL="$(find "$MODEL_CACHE" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+    echo "Using local Qwen snapshot: $MODEL"
+  else
+    MODEL="$QWEN_MODEL_ID"
   fi
+else
+  MODEL="$QWEN_MODEL_ID"
 fi
 
 if [[ "$USE_BATCH" == "true" ]]; then

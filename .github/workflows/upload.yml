@@ -79,6 +79,8 @@ jobs:
               try:
                   path = snapshot_download(repo_id=model, token=token)
                   print(f"Qwen model ready at {path}")
+                  with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+                      env_file.write(f"QWEN_MODEL_PATH={path}\n")
                   break
               except Exception as exc:
                   last_err = exc
@@ -122,8 +124,6 @@ jobs:
           CI: "true"
           HF_HOME: ~/.cache/huggingface
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_HUB_OFFLINE: "1"
-          TRANSFORMERS_OFFLINE: "1"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}

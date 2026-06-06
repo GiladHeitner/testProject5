@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 import subprocess
 from itertools import product
@@ -127,9 +126,6 @@ def main() -> None:
 
     use_gpu = args.device.startswith("cuda")
     dtype = torch.bfloat16 if use_gpu else torch.float32
-
-    if os.environ.get("HF_HUB_OFFLINE") == "1":
-        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
     # qwen_tts prints a flash-attn warning on import; suppress noisy import output on non-CUDA setups.
     with redirect_stdout(io.StringIO()):
