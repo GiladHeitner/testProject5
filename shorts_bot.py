@@ -154,8 +154,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--narration-volume",
         type=float,
-        default=2.4,
-        help="Voice-over gain in the final mix (default 2.4).",
+        default=2.7,
+        help="Voice-over gain in the final mix (default 2.7).",
     )
     parser.add_argument(
         "--no-popup-sfx",

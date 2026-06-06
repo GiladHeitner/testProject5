@@ -758,7 +758,7 @@ INDEX_HTML = r"""<!doctype html>
               <div class="field"><label>Ramp (ms)</label>
                 <input type="number" id="speed_ramp_ms" value="600"></div>
               <div class="field"><label>Voice volume</label>
-                <input type="number" id="narration_volume" step="0.1" value="2.4"></div>
+                <input type="number" id="narration_volume" step="0.1" value="2.7"></div>
               <div class="field"><label>Popup SFX volume</label>
                 <input type="number" id="popup_sfx_volume" step="0.05" value="0.15"></div>
               <div class="field"><label>SFX speed</label>

@@ -369,7 +369,7 @@ def compose_video(
     popup_sfx_trim_seconds: float = 1.4,
     popup_sfx_speed: float = 1.25,
     popup_sfx_volume: float = 0.15,
-    narration_volume: float = 2.4,
+    narration_volume: float = 2.7,
     bgm_path: Path | None = None,
     bgm_volume: float = 0.08,
     source_top_crop: int = 96,
