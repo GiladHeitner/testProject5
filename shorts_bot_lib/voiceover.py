@@ -44,6 +44,38 @@ def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
     return chunks or [text]
 
 
+def cloner_reference_audio_path(project_root: Path) -> Path:
+    """Reference clip for VoiceCloner (REF_AUDIO env override)."""
+    ref = os.environ.get("REF_AUDIO", "").strip()
+    if ref:
+        ref_path = Path(ref).expanduser()
+        if not ref_path.is_absolute():
+            ref_path = (project_root / "VoiceCloner" / ref).resolve()
+        return ref_path
+    return (project_root / "assets" / "grove_3.m4a").resolve()
+
+
+def resolve_tts_engine(requested: str, project_root: Path) -> str:
+    """Pick cloner vs OpenAI; CI and missing reference wav use OpenAI."""
+    engine = (requested or "cloner").strip().lower()
+    if engine == "openai":
+        return "openai"
+    ref = cloner_reference_audio_path(project_root)
+    if ref.is_file():
+        return "cloner"
+    if os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS"):
+        print(
+            "[tts] CI has no Omar reference wav — using OpenAI TTS.",
+            flush=True,
+        )
+        return "openai"
+    print(
+        f"[tts] Reference audio missing ({ref.name}) — using OpenAI TTS.",
+        flush=True,
+    )
+    return "openai"
+
+
 def _resolve_cloner_script(project_root: Path, configured_script: str) -> Path:
     if configured_script:
         script_path = Path(configured_script).expanduser().resolve()

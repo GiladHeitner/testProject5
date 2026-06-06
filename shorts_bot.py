@@ -65,6 +65,7 @@ from shorts_bot_lib.video import compose_video, pick_sfx_for_popups
 from shorts_bot_lib.voiceover import (
     generate_voiceover_from_cloner_script,
     generate_voiceover_openai_tts,
+    resolve_tts_engine,
 )
 from shorts_bot_lib.youtube_api import (
     append_upload_registry,
@@ -753,7 +754,8 @@ def main() -> None:
     else:
         print_progress(step, total_steps, "Creating voiceover")
         raw_narration_file = output_dir / "narration_raw.mp3"
-        if args.tts == "openai":
+        tts_engine = resolve_tts_engine(args.tts, project_root)
+        if tts_engine == "openai":
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --tts openai.")
             generate_voiceover_openai_tts(client, script, raw_narration_file)

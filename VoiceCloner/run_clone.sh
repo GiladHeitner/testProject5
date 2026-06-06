@@ -4,7 +4,7 @@ set -euo pipefail
 # -----------------------------
 # Edit these values each run
 # -----------------------------
-REF_AUDIO="${REF_AUDIO:-grove_3.wav}"
+REF_AUDIO="${REF_AUDIO:-../assets/grove_3.m4a}"
 REF_TEXT_FILE="${REF_TEXT_FILE:-transcript.txt}"
 TEXT="${TEXT:-The gilded age of the late nineteenth century was one of the most}"
 LANGUAGE="${LANGUAGE:-English}"
@@ -32,10 +32,32 @@ fi
 
 REF_TEXT="$(cat "$REF_TEXT_FILE")"
 
+# Qwen expects wav; convert m4a/mp3/etc. on the fly.
+REF_FOR_CLONE="$REF_AUDIO"
+REF_TMP=""
+if [[ ! -f "$REF_AUDIO" ]]; then
+  echo "Reference audio not found: $REF_AUDIO" >&2
+  exit 1
+fi
+case "$REF_AUDIO" in
+  *.wav|*.WAV) REF_FOR_CLONE="$REF_AUDIO" ;;
+  *)
+    REF_TMP="$(mktemp "${TMPDIR:-/tmp}/omar_ref.XXXXXX.wav")"
+    ffmpeg -y -loglevel error -i "$REF_AUDIO" -ar 24000 -ac 1 "$REF_TMP"
+    REF_FOR_CLONE="$REF_TMP"
+    ;;
+esac
+cleanup_ref() {
+  if [[ -n "$REF_TMP" && -f "$REF_TMP" ]]; then
+    rm -f "$REF_TMP"
+  fi
+}
+trap cleanup_ref EXIT
+
 if [[ "$USE_BATCH" == "true" ]]; then
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
   python clone_voice.py \
-    --ref-audio "$REF_AUDIO" \
+    --ref-audio "$REF_FOR_CLONE" \
     --ref-text "$REF_TEXT" \
     --text "$TEXT" \
     --language "$LANGUAGE" \
@@ -46,7 +68,7 @@ if [[ "$USE_BATCH" == "true" ]]; then
 else
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
   python clone_voice.py \
-    --ref-audio "$REF_AUDIO" \
+    --ref-audio "$REF_FOR_CLONE" \
     --ref-text "$REF_TEXT" \
     --text "$TEXT" \
     --language "$LANGUAGE" \
