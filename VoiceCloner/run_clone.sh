@@ -54,6 +54,17 @@ cleanup_ref() {
 }
 trap cleanup_ref EXIT
 
+QWEN_MODEL="${MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
+HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
+MODEL_CACHE="$HF_CACHE/models--$(echo "$QWEN_MODEL" | tr '/' '--')"
+if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  if [[ -d "$MODEL_CACHE" ]]; then
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    echo "Using cached Qwen model offline: $QWEN_MODEL"
+  fi
+fi
+
 if [[ "$USE_BATCH" == "true" ]]; then
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
   python clone_voice.py \

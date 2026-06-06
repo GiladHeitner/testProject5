@@ -63,6 +63,33 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-qwen-tts-
 
+      - name: Prefetch Qwen TTS model
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          . .venv/bin/activate
+          python - <<'PY'
+          import os, time
+          from huggingface_hub import snapshot_download
+
+          model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+          token = os.environ.get("HF_TOKEN") or None
+          last_err = None
+          for attempt in range(6):
+              try:
+                  path = snapshot_download(repo_id=model, token=token)
+                  print(f"Qwen model ready at {path}")
+                  break
+              except Exception as exc:
+                  last_err = exc
+                  wait = 20 * (attempt + 1)
+                  print(f"Prefetch attempt {attempt + 1} failed: {exc}")
+                  print(f"Retrying in {wait}s...")
+                  time.sleep(wait)
+          else:
+              raise SystemExit(f"Failed to prefetch {model}: {last_err}")
+          PY
+
       - name: Materialize required auth files from secrets
         env:
           YT_CLIENT_SECRET_JSON: ${{ secrets.YT_CLIENT_SECRET_JSON }}
@@ -93,6 +120,10 @@ jobs:
       - name: Generate and upload short
         env:
           CI: "true"
+          HF_HOME: ~/.cache/huggingface
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
@@ -102,7 +133,7 @@ jobs:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
           WIKIMEDIA_USER_AGENT_CONTACT: ${{ secrets.WIKIMEDIA_USER_AGENT_CONTACT }}
-        run: ./run.sh --reddit-topic --tts openai
+        run: ./run.sh --reddit-topic
 
       - name: Save used topic
         run: |
