@@ -96,6 +96,7 @@ def _build_cmd(payload: dict[str, Any]) -> list[str]:
     add_val("speed_ramp_ms", "--speed-ramp-ms")
     add_val("speed_slow", "--speed-slow")
     add_val("speed_fast", "--speed-fast")
+    add_val("narration_volume", "--narration-volume")
     add_val("popup_sfx_volume", "--popup-sfx-volume")
     add_val("popup_sfx_speed", "--popup-sfx-speed")
     add_val("popup_sfx_trim_seconds", "--popup-sfx-trim-seconds")
@@ -256,6 +257,26 @@ def _list_gameplay_files() -> list[dict[str, str]]:
 @app.route("/api/gameplay")
 def api_gameplay():
     return jsonify({"files": _list_gameplay_files()})
+
+
+@app.route("/api/persona")
+def api_persona():
+    try:
+        from shorts_bot_lib.channel_persona import load_channel_persona, persona_summary
+
+        persona = load_channel_persona(project_root=PROJECT_ROOT)
+        return jsonify(
+            {
+                "name": persona.name,
+                "age": persona.age,
+                "gender": persona.gender,
+                "identity": persona.identity,
+                "slang": persona.slang,
+                "summary": persona_summary(persona),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/latest")
@@ -692,12 +713,15 @@ INDEX_HTML = r"""<!doctype html>
                 <label class="switch"><input type="checkbox" id="quick_test"><span class="slider"></span></label></div>
                 <div class="hint">Quick smoke test of the render pipeline.</div></div>
               <div class="field"><div class="row-inline"><label>Dynamic speed ramps</label>
-                <label class="switch"><input type="checkbox" id="dynamic_speed" checked><span class="slider"></span></label></div>
+                <label class="switch"><input type="checkbox" id="dynamic_speed"><span class="slider"></span></label></div>
                 <div class="hint">Slow-mo on highlighted beats, snap back to normal.</div></div>
             </div>
           </section>
 
           <section data-view="script">
+            <div id="channelHost" class="placeholder" style="padding:12px 14px;text-align:left;margin-bottom:12px">
+              Loading channel host…
+            </div>
             <div class="grid-2">
               <div class="field"><label>Target words</label>
                 <input type="number" id="words" value="100" min="15" max="250">
@@ -717,13 +741,13 @@ INDEX_HTML = r"""<!doctype html>
           <section data-view="audio">
             <div class="grid-2">
               <div class="field"><label>TTS engine</label>
-                <select id="tts"><option value="cloner">cloner (local Adam)</option><option value="openai">openai</option></select></div>
+                <select id="tts"><option value="cloner">cloner (local Omar)</option><option value="openai">openai</option></select></div>
               <div class="field"><label>Background music</label>
                 <select id="bgm_path">
                   <option value="assets/BackgroundMusic.mp3">Background music</option>
                 </select></div>
               <div class="field"><label>BGM volume</label>
-                <input type="number" id="bgm_volume" step="0.01" value="0.25"></div>
+                <input type="number" id="bgm_volume" step="0.01" value="0.12"></div>
             </div>
             <div class="sep"></div>
             <div class="grid-2">
@@ -733,8 +757,10 @@ INDEX_HTML = r"""<!doctype html>
                 <input type="number" id="speed_fast" step="0.05" value="1.15"></div>
               <div class="field"><label>Ramp (ms)</label>
                 <input type="number" id="speed_ramp_ms" value="600"></div>
-              <div class="field"><label>SFX volume</label>
-                <input type="number" id="popup_sfx_volume" step="0.05" value="0.55"></div>
+              <div class="field"><label>Voice volume</label>
+                <input type="number" id="narration_volume" step="0.1" value="2.4"></div>
+              <div class="field"><label>Popup SFX volume</label>
+                <input type="number" id="popup_sfx_volume" step="0.05" value="0.15"></div>
               <div class="field"><label>SFX speed</label>
                 <input type="number" id="popup_sfx_speed" step="0.05" value="1.25"></div>
               <div class="field"><label>SFX trim (s)</label>
@@ -752,7 +778,7 @@ INDEX_HTML = r"""<!doctype html>
                 <select id="gameplay_path">
                   <option value="">Random</option>
                 </select>
-                <div class="hint">Random picks one of the videos in assets/gameplay.</div></div>
+                <div class="hint">Random picks Minecraft or Roblox from assets/gameplay.</div></div>
               <div class="field"><label>Gameplay top crop (px)</label>
                 <input type="number" id="gameplay_top_crop" value="96"></div>
               <div class="field"><label>Duration (s, optional)</label>
@@ -841,7 +867,7 @@ INDEX_HTML = r"""<!doctype html>
   // Inputs
   const inputIds = [
     "words","topic","topic_file","tts","privacy","duration_seconds","speed_ramp_ms","speed_slow","speed_fast",
-    "popup_sfx_volume","popup_sfx_speed","popup_sfx_trim_seconds","bgm_path","bgm_volume",
+    "narration_volume","popup_sfx_volume","popup_sfx_speed","popup_sfx_trim_seconds","bgm_path","bgm_volume",
     "gameplay_path","gameplay_top_crop",
     "script",
     "dynamic_speed","generate_images","images_only","skip_tts","video_only","quick_test","reddit_topic",
@@ -1105,6 +1131,26 @@ INDEX_HTML = r"""<!doctype html>
     } catch (e) {}
   }
 
+  async function loadChannelHost() {
+    const el = $("channelHost");
+    if (!el) return;
+    try {
+      const res = await fetch("/api/persona");
+      const data = await res.json();
+      if (data.error) {
+        el.textContent = data.error;
+        return;
+      }
+      const slang = (data.slang || []).slice(0, 5).join(", ");
+      el.innerHTML =
+        `<strong>Channel host:</strong> ${data.summary} · ${data.identity}<br>` +
+        `<span class="hint">Slang: ${slang || "wallah, yallah, inshallah"}</span>`;
+      el.classList.remove("placeholder");
+    } catch (e) {
+      el.textContent = "Could not load channel host persona.";
+    }
+  }
+
   (async function init() {
     const res = await fetch("/api/status"); const data = await res.json();
     if (data.running) {
@@ -1113,6 +1159,7 @@ INDEX_HTML = r"""<!doctype html>
       cmdDisplay.textContent = data.cmd || "";
     }
     await loadGameplayOptions();
+    await loadChannelHost();
     refreshPreview();
   })();
 </script>

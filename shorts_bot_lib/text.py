@@ -12,10 +12,28 @@ def normalize_word_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def strip_speed_ramp_hyphens(script_text: str) -> str:
+    """Remove --double-hyphen-- markers; keep paragraph breaks."""
+    cleaned = re.sub(r"--([^-][^-]*?)--", r"\1", script_text)
+    cleaned = re.sub(r"--+", "", cleaned)
+    return cleaned.strip()
+
+
+def strip_paralinguistic_tags(script_text: str) -> str:
+    """Remove Qwen TTS director tags like [sigh] from display/subtitle text."""
+    cleaned = re.sub(
+        r"\[(?:sigh|breath|laugh|pause|scoff|groan|chuckle)\]",
+        "",
+        script_text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def strip_script_markup(script_text: str) -> str:
+    cleaned = strip_speed_ramp_hyphens(script_text)
     cleaned = (
-        script_text.replace("--", " ")
-        .replace("*", "")
+        cleaned.replace("*", "")
         .replace("\u201c", '"')
         .replace("\u201d", '"')
     )
@@ -80,8 +98,29 @@ def normalize_script_for_tts(script_text: str) -> str:
     return "\n".join(lines) if len(lines) > 1 else (lines[0] if lines else "")
 
 
+_OMAR_SLANG_PHONETICS: dict[str, str] = {
+    "wallah": "wah-lah",
+    "yallah": "yah-lah",
+    "habibi": "hah-bee-bee",
+    "astaghfirullah": "ah-stug-feer-oo-lah",
+    "inshallah": "in-shah-lah",
+}
+
+
+def format_omar_script(script: str) -> str:
+    """Phonetic spellings so Qwen's English engine reads Arab/Muslim slang naturally."""
+    for word, phonetic in _OMAR_SLANG_PHONETICS.items():
+        script = re.sub(rf"\b{re.escape(word)}\b", phonetic, script, flags=re.IGNORECASE)
+    return script
+
+
+def prepare_script_for_qwen_tts(script_text: str) -> str:
+    """Normalize casing, then apply Omar slang phonetics. Keeps [sigh]-style tags."""
+    return format_omar_script(normalize_script_for_tts(script_text))
+
+
 def script_words_for_alignment(script_text: str) -> List[str]:
-    cleaned = strip_script_markup(script_text).replace('"', " ")
+    cleaned = strip_paralinguistic_tags(strip_script_markup(script_text)).replace('"', " ")
     return [word for word in cleaned.split() if word]
 
 

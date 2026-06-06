@@ -29,13 +29,18 @@ def build_hook_video_queries(
     """Produce 4-6 ranked stock-video search queries for the hook clip.
 
     The queries must depict the OVERALL TOPIC of the video (not just the
-    first sentence) — e.g. hijab conflict at school, airport profiling, Ramadan
-    fasting, family dinner, mosque, yearbook photo line.
+    first sentence) — e.g. Ramadan fasting at school, airport profiling,
+    family dinner, mosque, basketball tryouts.
     """
     fallback: List[str] = []
     if base_query:
         fallback.append(base_query.strip())
-    fallback.extend(["teen hijab school", "airport security line", "family dinner table"])
+    fallback.extend([
+        "teen boy school hallway",
+        "airport security teen",
+        "mosque prayer room",
+        "family dinner table",
+    ])
     fallback = [q for q in dict.fromkeys(fallback) if q]
 
     if client is None:
@@ -52,8 +57,9 @@ def build_hook_video_queries(
                         "You generate stock-video search queries for the FIRST 1.5 seconds "
                         "of a Muslim/Arab teen storytime YouTube Short. Queries must "
                         "produce a CINEMATIC, eye-catching clip for the overall story "
-                        "(hijab at school, mosque, airport line, family kitchen, Ramadan, "
-                        "yearbook, etc. — NOT just the first sentence). Use 2-4 visual "
+                        "(school hallway, mosque, airport line, family kitchen, Ramadan, "
+                        "basketball tryouts, etc. — NOT hijab-first or female-only angles). "
+                        "Use 2-4 visual "
                         "words per query. Prefer concrete motion (walking hallway, "
                         "security scanner, dinner table). No proper names."
                     ),

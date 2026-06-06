@@ -83,23 +83,28 @@ def build_subscribe_cta_popup(
     except Exception as exc:
         print(f"Subscribe CTA: could not read GIF duration: {exc}")
         return None
-    end = min(start + max(0.2, gif_duration), narration_duration - 0.05)
-    if end <= start:
+    end = max(start + 0.2, narration_duration - 0.05)
+    available = end - start
+    if available <= 0:
         return None
-    x = (1080 - popup_width) // 2
-    print(f"Subscribe CTA: {path.name} @ {start:.2f}-{end:.2f}s")
+    playback_speed = max(1.0, gif_duration / available)
+    print(
+        f"Subscribe CTA: {path.name} @ {start:.2f}-{end:.2f}s "
+        f"(gif {gif_duration:.2f}s @ {playback_speed:.1f}x from start)"
+    )
     return PopupImage(
         path=path.resolve(),
         start_sec=start,
         end_sec=end,
-        x=x,
+        x=(1080 - popup_width) // 2,
         y=popup_y,
         width=popup_width,
         preserve_aspect=True,
-        use_fade=True,
+        use_fade=False,
         play_sfx=False,
         sfx_path=None,
         chroma_key=DEFAULT_CHROMA_KEY or None,
+        playback_speed=playback_speed,
     )
 
 
@@ -134,7 +139,7 @@ def apply_subscribe_cta(
     gif_path: Path,
     protect: PopupImage | None = None,
 ) -> List[PopupImage]:
-    """Filter overlapping popups and append subscribe GIF overlay last."""
+    """Filter overlapping popups and append the subscribe GIF overlay."""
     cta = build_subscribe_cta_popup(
         word_segments=word_segments,
         narration_duration=narration_duration,

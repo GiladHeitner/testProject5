@@ -33,8 +33,16 @@ from shorts_bot_lib.images import (
 from shorts_bot_lib.runner import (
     ffmpeg_has_subtitles_filter,
     ffprobe_duration_seconds,
-    pick_random_file,
     print_progress,
+)
+from shorts_bot_lib.video import (
+    classify_gameplay_family,
+    gameplay_credit_block,
+    pick_random_gameplay,
+)
+from shorts_bot_lib.channel_persona import (
+    load_channel_persona,
+    persona_summary,
 )
 from shorts_bot_lib.keyword_popups import build_keyword_popups
 from shorts_bot_lib.subscribe_cta import apply_subscribe_cta
@@ -45,7 +53,7 @@ from shorts_bot_lib.script_ai import (
     generate_script,
 )
 from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
-from shorts_bot_lib.text import get_highlight_timestamps
+from shorts_bot_lib.text import get_highlight_timestamps, strip_speed_ramp_hyphens
 from shorts_bot_lib.transcribe import (
     get_whisper_word_timestamps,
     transcribe_audio_to_srt,
@@ -92,13 +100,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--adam-cloner-script",
         default="",
-        help="Optional path to Adam voice cloner run script (defaults to VoiceCloner/run_clone.sh)",
+        help="Optional path to voice cloner run script (defaults to VoiceCloner/run_clone.sh)",
     )
     parser.add_argument(
         "--tts",
         default="cloner",
         choices=["cloner", "openai"],
-        help="Narration engine: cloner (local Adam voice) or openai (cloud-friendly).",
+        help="Narration engine: cloner (local Omar voice) or openai (cloud-friendly).",
     )
     parser.add_argument(
         "--dynamic-speed",
@@ -140,9 +148,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--video-only", action="store_true")
     parser.add_argument("--popup-sfx", default="assets/sounds/mouse-click-sound.mp3")
-    parser.add_argument("--popup-sfx-volume", type=float, default=0.55)
+    parser.add_argument("--popup-sfx-volume", type=float, default=0.15)
     parser.add_argument("--popup-sfx-speed", type=float, default=1.25)
     parser.add_argument("--popup-sfx-trim-seconds", type=float, default=1.4)
+    parser.add_argument(
+        "--narration-volume",
+        type=float,
+        default=2.4,
+        help="Voice-over gain in the final mix (default 2.4).",
+    )
     parser.add_argument(
         "--no-popup-sfx",
         action="store_true",
@@ -190,6 +204,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Skip every generation step and only upload the existing "
              "output/short.mp4 to YouTube using output/script.txt for "
              "metadata. Implies --upload.",
+    )
+    parser.add_argument(
+        "--persona-file",
+        default="",
+        metavar="PATH",
+        help="Channel host persona JSON (default: assets/channel_persona.json).",
     )
     parser.add_argument(
         "--no-reddit-card",
@@ -377,6 +397,53 @@ def _drop_hook_overlapping_popups(
     return kept
 
 
+def _resolve_persona_path(args: argparse.Namespace, project_root: Path) -> Path | None:
+    raw = (getattr(args, "persona_file", None) or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else project_root / path
+
+
+def _load_channel_persona(args: argparse.Namespace, project_root: Path):
+    return load_channel_persona(_resolve_persona_path(args, project_root), project_root=project_root)
+
+
+def _save_persona_snapshot(persona, output_dir: Path) -> None:
+    from dataclasses import asdict
+
+    snapshot = output_dir / "persona.json"
+    snapshot.write_text(json.dumps(asdict(persona), indent=2) + "\n", encoding="utf-8")
+
+
+def _save_gameplay_snapshot(gameplay_file: Path, output_dir: Path) -> None:
+    snapshot = output_dir / "gameplay.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "file": gameplay_file.name,
+                "family": classify_gameplay_family(gameplay_file),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_gameplay_credit(output_dir: Path, project_root: Path) -> str:
+    snapshot = output_dir / "gameplay.json"
+    if snapshot.exists():
+        try:
+            data = json.loads(snapshot.read_text(encoding="utf-8"))
+            name = str(data.get("file") or "").strip()
+            if name:
+                return gameplay_credit_block(project_root / "assets" / "gameplay" / name)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return ""
+
+
 def _run_upload_only(
     args: argparse.Namespace,
     client: OpenAI | None,
@@ -389,14 +456,23 @@ def _run_upload_only(
             f"Cannot upload: {output_video} not found. Run a normal generation first."
         )
     script_file = output_dir / "script.txt"
-    script = script_file.read_text(encoding="utf-8").strip() if script_file.exists() else ""
+    script = strip_speed_ramp_hyphens(
+        script_file.read_text(encoding="utf-8").strip() if script_file.exists() else ""
+    )
+    project_root = Path.cwd()
+    channel_persona = _load_channel_persona(args, project_root)
+    gameplay_credit = _load_gameplay_credit(output_dir, project_root)
 
     print_progress(1, 2, "Generating metadata")
     title = ""
     description = ""
     if client is not None and script:
         title, description = generate_metadata(
-            client, script, include_description=not args.no_description
+            client,
+            script,
+            include_description=not args.no_description,
+            persona=channel_persona,
+            gameplay_credit=gameplay_credit,
         )
     if not title:
         hook = script.split(".")[0].strip() if script else ""
@@ -438,9 +514,9 @@ def _run_images_only(
     output_dir: Path,
 ) -> None:
     script_file = output_dir / "script.txt"
-    script = (args.script or "").strip()
+    script = strip_speed_ramp_hyphens((args.script or "").strip())
     if not script and script_file.exists():
-        script = script_file.read_text(encoding="utf-8").strip()
+        script = strip_speed_ramp_hyphens(script_file.read_text(encoding="utf-8").strip())
     if not script:
         raise RuntimeError(
             "No script found for --images-only. Provide --script or ensure output/script.txt exists."
@@ -568,12 +644,18 @@ def main() -> None:
         )
 
     if args.topic.strip() and not args.reddit_topic:
-        from shorts_bot_lib.reddit_topics import matches_muslim_arab_niche
+        from shorts_bot_lib.reddit_topics import matches_host_persona, matches_muslim_arab_niche
 
         if not matches_muslim_arab_niche(args.topic):
             print(
                 "[topic] Warning: topic may not match Muslim/Arab niche — "
                 "script will still follow channel prompts.",
+                file=sys.stderr,
+            )
+        if not matches_host_persona(args.topic):
+            print(
+                "[topic] Warning: topic may not fit the channel host persona — "
+                "consider a male-host-friendly story.",
                 file=sys.stderr,
             )
 
@@ -606,19 +688,22 @@ def main() -> None:
         if not gameplay_file.exists():
             raise FileNotFoundError(f"Gameplay file not found: {gameplay_file}")
     else:
-        gameplay_file = pick_random_file(gameplay_dir, ["mp4", "mov", "mkv", "webm"])
+        gameplay_file = pick_random_gameplay(gameplay_dir)
+    _save_gameplay_snapshot(gameplay_file, output_dir)
 
     total_steps = 6 + (1 if args.upload else 0)
     step = 1
     start_ts = time.time()
+    channel_persona = _load_channel_persona(args, project_root)
+    print(f"Channel host: {persona_summary(channel_persona)}")
 
     # Step 1: script
     script_file = output_dir / "script.txt"
-    provided_script = (args.script or "").strip()
+    provided_script = strip_speed_ramp_hyphens((args.script or "").strip())
     if args.video_only:
         print_progress(step, total_steps, "Reusing existing script")
         if script_file.exists():
-            script = script_file.read_text(encoding="utf-8").strip()
+            script = strip_speed_ramp_hyphens(script_file.read_text(encoding="utf-8").strip())
         else:
             script = "Muslim Teen Story You Won't Believe"
     elif provided_script:
@@ -630,7 +715,12 @@ def main() -> None:
     else:
         while True:
             print_progress(step, total_steps, "Generating story script")
-            script = generate_script(client, args.words, topic=args.topic)  # type: ignore[arg-type]
+            script = generate_script(
+                client,
+                args.words,
+                topic=args.topic,
+                persona=channel_persona,
+            )  # type: ignore[arg-type]
             clean_script = script.replace("*", "")
             print("\n--- Generated Script ---")
             print(clean_script)
@@ -640,7 +730,9 @@ def main() -> None:
                 auto_accept=bool(args.reddit_topic or args.topic_file),
             ):
                 break
+    script = strip_speed_ramp_hyphens(script)
     script_file.write_text(script, encoding="utf-8")
+    _save_persona_snapshot(channel_persona, output_dir)
 
     # Step 2: voiceover
     step += 1
@@ -856,9 +948,18 @@ def main() -> None:
         project_root / "assets" / "sounds",
         project_root / "assets" / "sounds_normalized",
     )
+    subscribe_popup = next(
+        (p for p in reversed(popups) if p.path.name.lower() == "youtubebutton.gif"),
+        None,
+    )
+    click_sfx = normalized_sounds_dir / "mouse-click-sound.mp3"
+    if subscribe_popup is not None and click_sfx.is_file():
+        subscribe_popup.play_sfx = True
+        subscribe_popup.sfx_path = click_sfx.resolve()
+        print(f"Click SFX on subscribe CTA: {click_sfx.name}")
     if args.no_popup_sfx:
         for popup in popups:
-            if popup is opening_popup:
+            if popup is opening_popup or popup is subscribe_popup:
                 continue
             popup.play_sfx = False
             popup.sfx_path = None
@@ -888,12 +989,13 @@ def main() -> None:
         srt_path=subtitle_file,
         popup_images=popups,
         out_video_path=output_video,
-        duration_seconds=args.duration_seconds,
+        duration_seconds=args.duration_seconds or narration_duration,
         burn_subtitles=burn_subtitles,
         popup_sfx_path=Path(args.popup_sfx) if args.popup_sfx else None,
         popup_sfx_trim_seconds=args.popup_sfx_trim_seconds,
         popup_sfx_speed=args.popup_sfx_speed,
         popup_sfx_volume=args.popup_sfx_volume,
+        narration_volume=args.narration_volume,
         bgm_path=Path(args.bgm_path) if args.bgm_path else None,
         bgm_volume=args.bgm_volume,
         source_top_crop=args.gameplay_top_crop,
@@ -904,7 +1006,11 @@ def main() -> None:
     print_progress(step, total_steps, "Generating metadata")
     if client is not None:
         title, description = generate_metadata(
-            client, script, include_description=not args.no_description
+            client,
+            script,
+            include_description=not args.no_description,
+            persona=channel_persona,
+            gameplay_credit=gameplay_credit_block(gameplay_file),
         )
     else:
         hook = script.split(".")[0].strip()
@@ -913,6 +1019,8 @@ def main() -> None:
         description = "" if args.no_description else (
             "Subscribe for more storytime shorts!\n#shorts #storytime #schoolstory"
         )
+        if description:
+            description = f"{description}\n\n{gameplay_credit_block(gameplay_file)}"
     if "#shorts" not in title.lower():
         title = f"{title} #Shorts"
     if description and "#shorts" not in description.lower():
@@ -930,7 +1038,7 @@ def main() -> None:
 
     print("\nDone.")
     print(f"Total run time: {time.time() - start_ts:.1f}s")
-    print(f"Gameplay source: {gameplay_file.name}")
+    print(f"Gameplay source: {gameplay_file.name} ({classify_gameplay_family(gameplay_file)})")
     print(f"Random start time: {selected_start:.2f}s")
     if args.duration_seconds is not None:
         print(f"Forced output duration: {args.duration_seconds:.2f}s")

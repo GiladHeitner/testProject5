@@ -95,8 +95,14 @@ def smart_speed_ramp(
     out.export(output_path, format="mp3", bitrate=bitrate)
 
 
-def _two_pass_loudnorm(src: Path, dst: Path) -> bool:
-    """Peak-normalize each SFX so no clip ends up quieter than the rest."""
+def _two_pass_loudnorm(
+    src: Path,
+    dst: Path,
+    *,
+    target_peak_db: float = -14.0,
+    target_rms_db: float = -20.0,
+) -> bool:
+    """Peak/RMS normalize SFX — default targets keep popups under narration."""
     measure_cmd = (
         f"ffmpeg -hide_banner -nostats -i {shlex.quote(str(src))} "
         f"-af volumedetect -f null -"
@@ -117,12 +123,11 @@ def _two_pass_loudnorm(src: Path, dst: Path) -> bool:
 
     peak_db = float(peak_match.group(1))
     mean_db = float(mean_match.group(1)) if mean_match else -25.0
-    peak_boost_db = max(0.0, -1.0 - peak_db)
-    target_rms_db = -14.0
-    projected_rms = mean_db + peak_boost_db
+    peak_adjust_db = target_peak_db - peak_db
+    projected_rms = mean_db + peak_adjust_db
     extra_rms_boost = max(0.0, target_rms_db - projected_rms)
-    extra_rms_boost = min(extra_rms_boost, 8.0)
-    total_boost_db = peak_boost_db + extra_rms_boost
+    extra_rms_boost = min(extra_rms_boost, 4.0)
+    total_boost_db = peak_adjust_db + extra_rms_boost
 
     filter_chain = f"volume={total_boost_db:.2f}dB,alimiter=limit=0.97:level=false"
     apply_cmd = (
@@ -152,8 +157,6 @@ def ensure_normalized_sounds(src_dir: Path, dst_dir: Path) -> Path:
         if not src.is_file():
             continue
         dst = dst_dir / (src.stem + ".mp3")
-        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
-            continue
         print(f"Normalizing {src.name} ...")
         if not _two_pass_loudnorm(src, dst):
             shutil.copyfile(src, dst)

@@ -1,4 +1,4 @@
-"""Narration generation: Adam voice cloner script + OpenAI TTS."""
+"""Narration generation: local voice cloner (Omar reference) + OpenAI TTS."""
 
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ from pathlib import Path
 from openai import OpenAI
 
 from .runner import print_sub_progress, run
-from .text import normalize_script_for_tts, strip_script_markup
+from .text import (
+    normalize_script_for_tts,
+    prepare_script_for_qwen_tts,
+    strip_paralinguistic_tags,
+    strip_script_markup,
+)
 
 
 def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
@@ -39,7 +44,7 @@ def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
     return chunks or [text]
 
 
-def _resolve_adam_cloner_script(project_root: Path, configured_script: str) -> Path:
+def _resolve_cloner_script(project_root: Path, configured_script: str) -> Path:
     if configured_script:
         script_path = Path(configured_script).expanduser().resolve()
     else:
@@ -51,7 +56,7 @@ def _resolve_adam_cloner_script(project_root: Path, configured_script: str) -> P
         script_path = next((p for p in candidates if p.exists()), Path(""))
     if not script_path or not script_path.exists():
         raise RuntimeError(
-            "Adam cloner script not found. Expected `VoiceCloner/run_clone.sh`."
+            "Voice cloner script not found. Expected `VoiceCloner/run_clone.sh`."
         )
     return script_path
 
@@ -59,10 +64,10 @@ def _resolve_adam_cloner_script(project_root: Path, configured_script: str) -> P
 def generate_voiceover_from_cloner_script(
     script_text: str, out_audio_path: Path, project_root: Path, cloner_script: str
 ) -> None:
-    run_clone_path = _resolve_adam_cloner_script(project_root, cloner_script)
+    run_clone_path = _resolve_cloner_script(project_root, cloner_script)
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
     env = os.environ.copy()
-    env["TEXT"] = normalize_script_for_tts(script_text)
+    env["TEXT"] = prepare_script_for_qwen_tts(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -98,7 +103,7 @@ def generate_voiceover_from_cloner_script(
         if not line:
             continue
         captured.append(line)
-        print(f"[adam] {line}", flush=True)
+        print(f"[cloner] {line}", flush=True)
         low = line.lower()
         for needle, phase_idx, label in phases:
             if needle in low and phase_idx > last_phase:
@@ -108,14 +113,14 @@ def generate_voiceover_from_cloner_script(
     rc = proc.wait()
     if rc != 0:
         raise RuntimeError(
-            "Adam run_clone.sh failed.\n"
+            "Voice cloner run_clone.sh failed.\n"
             + "\n".join(captured[-20:])
         )
 
     transformed = tmp_wav.with_name(tmp_wav.stem + "_sp.wav")
     source_audio = transformed if transformed.exists() else tmp_wav
     if not source_audio.exists():
-        raise RuntimeError("Adam cloner did not produce output audio.")
+        raise RuntimeError("Voice cloner did not produce output audio.")
     print_sub_progress(4, total_phases, "Encoding mp3")
     run(
         f"ffmpeg -y -i {shlex.quote(str(source_audio))} "
@@ -129,7 +134,7 @@ def generate_voiceover_from_cloner_script(
 
 
 def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_path: Path) -> None:
-    text = normalize_script_for_tts(script_text)
+    text = strip_paralinguistic_tags(normalize_script_for_tts(script_text))
     if not text:
         raise RuntimeError("Empty script text; cannot generate voiceover.")
     chunks = _split_for_tts(text)

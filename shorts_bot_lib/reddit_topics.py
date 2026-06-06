@@ -1,7 +1,7 @@
 """Fetch top weekly text posts from Reddit for Shorts topic input.
 
 Uses PRAW when REDDIT_CLIENT_ID/SECRET are set; otherwise public .json
-endpoints (no Reddit app required).
+endpoints (no Reddit app required). Harvest can also use pullpush.io (Reddit archive).
 """
 
 from __future__ import annotations
@@ -37,10 +37,49 @@ DEFAULT_SUBREDDITS = (
 
 # Prefer topics that match high-performing angles on this channel.
 _PRIORITY_NICHE_KEYWORDS = re.compile(
-    r"hijab|islamophob|against arabs?|terrorist|muslim hate|arab hate|"
+    r"islamophob|against arabs?|terrorist|muslim hate|arab hate|"
     r"ramadan|picture day|group chat|yearbook|mosque|airport|tsa|halal|"
     r"arranged|cousin|convert|hate crime|iftar|suhoor|fasting|eid|"
-    r"diaspora|desi|abaya|prayer|imam|profiling",
+    r"diaspora|desi|prayer|imam|profiling|jummah|"
+    r"bomb joke|racism against|being muslim|being arab",
+    re.IGNORECASE,
+)
+
+# Meme titles, copypasta, awareness spam — not storytime.
+_STORYTIME_REJECT_RE = re.compile(
+    r"deep down we all know|repost it please|spread awareness|"
+    r"concentration camps in china|step 1:|step 2:|"
+    r"\bpepe\b|minecraft|terraria|gamer moment|"
+    r"ternion all powerful|gifted ternion|"
+    r"jedi and heres a tutorial|halal love\.\s*$|"
+    r"^any muslims\?\s*$|just seeing if there are other muslims|"
+    r"greatest nation on earth|happy 4th of july|proud americans|"
+    r"the weeknd|marawi 2\.0|^my 0pinion$|^my opinion$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# r/teenagers keyword hits include meme posts; require a real story beat.
+_TEEN_STORY_ANGLE_RE = re.compile(
+    r"teacher|school|parents?|friend|coworker|boss|manager|"
+    r"class|principal|called me|group chat|airport|security|"
+    r"fasting|ramadan|mosque|neighbor|convert|marry|cousin|"
+    r"bomb joke|racist|discriminat|islamophob|halal|iftar|"
+    r"crush|girl likes|friend zone",
+    re.IGNORECASE,
+)
+
+_HARVEST_PREFERRED_SUBREDDITS = frozenset(
+    {"muslim", "islam", "muslimlounge", "arabs", "abcdesis", "arabworld"}
+)
+MIN_HARVEST_SELFTEXT_CHARS = 120
+
+# Stories centered on female-only experiences (hijab, prom dress, etc.).
+_FEMALE_PROTAGONIST_RE = re.compile(
+    r"\b("
+    r"hijab|hijabi|niqab|burqa|abaya|take off my hijab|my hijab|"
+    r"muslim girl|prom dress|buying dresses|look oppressed|"
+    r"she wears hijab|headscarf.*distract|dress code violation.*hijab"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -64,6 +103,7 @@ _MUSLIM_ARAB_KEYWORDS = re.compile(
     r"against arabs?|against muslims?|muslim hate|arab hate|"
     r"desi|diaspora|iftar|suhoor|fasting|salah|prayer|imam|abaya|"
     r"pakistani|lebanese|syrian|moroccan|egyptian|turkish|turk|"
+    r"cousin|arranged|terrorist|islamophob|revert|honor kill|"
     r"yearbook.*hijab|hijab.*yearbook"
     r")\b",
     re.IGNORECASE,
@@ -72,6 +112,85 @@ _MUSLIM_ARAB_KEYWORDS = re.compile(
 
 def matches_muslim_arab_niche(text: str) -> bool:
     return bool(_MUSLIM_ARAB_KEYWORDS.search(text or ""))
+
+
+def host_persona_gender() -> str:
+    try:
+        from .channel_persona import load_channel_persona
+
+        return load_channel_persona().gender.strip().lower() or "male"
+    except Exception:
+        return os.environ.get("HOST_PERSONA_GENDER", "male").strip().lower() or "male"
+
+
+def matches_host_persona(text: str, gender: str | None = None) -> bool:
+    """True if the story fits the channel host (e.g. male Omar, not hijab-first posts)."""
+    g = (gender or host_persona_gender()).strip().lower()
+    if g == "male" and _FEMALE_PROTAGONIST_RE.search(text or ""):
+        return False
+    return True
+
+
+def _topic_body(text: str) -> str:
+    lines = (text or "").splitlines()
+    if len(lines) > 3 and lines[0].startswith("Reddit post from r/"):
+        return "\n".join(lines[3:]).strip()
+    return text.strip()
+
+
+def _topic_subreddit(text: str) -> str:
+    m = re.match(r"Reddit post from r/([^:]+):", (text or "").splitlines()[0] if text else "")
+    return (m.group(1) if m else "").strip().lower()
+
+
+def is_quality_storytime_post(post: RedditPost) -> bool:
+    """Real narrative posts for Omar — not memes or one-line Muslim mentions."""
+    text = post.topic_text
+    if not matches_muslim_arab_niche(text) or not matches_host_persona(text):
+        return False
+    if _STORYTIME_REJECT_RE.search(text):
+        return False
+    body = post.selftext.strip() or _topic_body(text)
+    if len(body) < MIN_HARVEST_SELFTEXT_CHARS:
+        return False
+    sub = post.subreddit.strip().lower()
+    if sub == "teenagers" and not _TEEN_STORY_ANGLE_RE.search(text):
+        return False
+    if topic_priority_score(text) >= 11:
+        return True
+    if sub == "teenagers" and _TEEN_STORY_ANGLE_RE.search(text) and len(body) >= 200:
+        return True
+    if sub in _HARVEST_PREFERRED_SUBREDDITS and len(body) >= 200:
+        return True
+    return False
+
+
+def is_quality_storytime_entry(text: str) -> bool:
+    if not matches_muslim_arab_niche(text) or not matches_host_persona(text):
+        return False
+    if _STORYTIME_REJECT_RE.search(text):
+        return False
+    body = _topic_body(text)
+    if len(body) < MIN_HARVEST_SELFTEXT_CHARS:
+        return False
+    sub = _topic_subreddit(text)
+    if sub == "teenagers" and not _TEEN_STORY_ANGLE_RE.search(text):
+        return False
+    if topic_priority_score(text) >= 11:
+        return True
+    if sub == "teenagers" and len(body) >= 200:
+        return True
+    if sub in _HARVEST_PREFERRED_SUBREDDITS and len(body) >= 200:
+        return True
+    return False
+
+
+def _filter_host_persona_topics(topics: list[str]) -> list[str]:
+    return [t for t in topics if matches_host_persona(t)]
+
+
+def _filter_host_persona_posts(posts: list[RedditPost]) -> list[RedditPost]:
+    return [p for p in posts if matches_host_persona(p.topic_text)]
 
 
 @dataclass(frozen=True)
@@ -262,26 +381,157 @@ def _oauth_token() -> str | None:
     return token or None
 
 
+def _http_timeout() -> float:
+    return float(os.environ.get("REDDIT_HTTP_TIMEOUT", "60"))
+
+
+def _fetch_delay() -> float:
+    return float(os.environ.get("REDDIT_FETCH_DELAY", "6.0"))
+
+
 def _http_json(url: str, headers: dict[str, str], *, retries: int = 2) -> dict[str, Any]:
     last_err: Exception | None = None
+    timeout = _http_timeout()
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
             last_err = exc
             if exc.code in (403, 429, 503) and attempt < retries:
-                time.sleep(1.5 * (attempt + 1))
+                time.sleep(_fetch_delay() * (attempt + 1))
                 continue
             raise
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last_err = exc
             if attempt < retries:
-                time.sleep(1.0)
+                time.sleep(_fetch_delay())
                 continue
             raise
     raise last_err  # type: ignore[misc]
+
+
+PULLPUSH_SEARCH = "https://api.pullpush.io/reddit/search/submission/"
+
+# (subreddit, query) — empty query = top-scored posts in that subreddit.
+PULLPUSH_HARVEST_BATCHES: tuple[tuple[str, str], ...] = (
+    ("muslim", ""),
+    ("MuslimLounge", ""),
+    ("islam", ""),
+    ("arabs", ""),
+    ("ABCDesis", ""),
+    ("ArabWorld", ""),
+    ("MuslimLounge", "islamophobia"),
+    ("MuslimLounge", "school"),
+    ("MuslimLounge", "work"),
+    ("muslim", "convert"),
+    ("muslim", "ramadan"),
+    ("islam", "convert"),
+    ("islam", "revert"),
+    ("arabs", "discrimination"),
+    ("ABCDesis", "parents"),
+    ("ABCDesis", "cousin"),
+    ("ABCDesis", "arranged"),
+    ("teenagers", "islamophobia"),
+    ("teenagers", "ramadan"),
+    ("teenagers", "arab"),
+    ("teenagers", "halal"),
+    ("teenagers", "mosque"),
+    ("teenagers", "profiling"),
+    ("teenagers", "convert"),
+)
+
+
+def _fetch_pullpush_posts(
+    *,
+    subreddit: str,
+    query: str,
+    size: int = 100,
+) -> list[dict[str, Any]]:
+    params: dict[str, str | int] = {
+        "subreddit": subreddit,
+        "size": min(100, max(10, size)),
+        "sort": "desc",
+        "sort_type": "score",
+    }
+    if query.strip():
+        params["q"] = query
+    params_encoded = urllib.parse.urlencode(params)
+    url = f"{PULLPUSH_SEARCH}?{params_encoded}"
+    try:
+        payload = _http_json(url, _request_headers(), retries=3)
+    except Exception as exc:
+        print(
+            f"[reddit] pullpush skip r/{subreddit} q={query!r}: {exc}",
+            file=sys.stderr,
+        )
+        return []
+    finally:
+        time.sleep(_fetch_delay())
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    result = rows if isinstance(rows, list) else []
+    if result or not query.strip() or " " not in query.strip():
+        return result
+    # Multi-word queries often return nothing; try each keyword.
+    seen_ids: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for word in query.split():
+        for row in _fetch_pullpush_posts(subreddit=subreddit, query=word, size=size):
+            if not isinstance(row, dict):
+                continue
+            rid = str(row.get("id") or "")
+            if rid and rid not in seen_ids:
+                seen_ids.add(rid)
+                merged.append(row)
+        time.sleep(_fetch_delay() * 0.5)
+    return merged
+
+
+def _post_from_pullpush(data: dict[str, Any]) -> RedditPost | None:
+    if data.get("stickied") or data.get("over_18"):
+        return None
+    selftext = (data.get("selftext") or "").strip()
+    title = (data.get("title") or "").strip()
+    if len(selftext) < MIN_SELFTEXT_CHARS and len(title) < MIN_TITLE_CHARS:
+        return None
+    if not title:
+        return None
+    permalink = (data.get("permalink") or "").strip()
+    if permalink and not permalink.startswith("http"):
+        permalink = f"https://reddit.com{permalink}"
+    sub = (data.get("subreddit") or "").strip() or "unknown"
+    post_id = str(data.get("id") or "")
+    if not post_id:
+        return None
+    return RedditPost(
+        post_id=post_id,
+        subreddit=sub,
+        title=title,
+        selftext=selftext,
+        permalink=permalink,
+        score=int(data.get("score") or 0),
+    )
+
+
+def _iter_candidates_pullpush(
+    queries: list[tuple[str, str]],
+    *,
+    per_query: int = 100,
+) -> Iterator[RedditPost]:
+    seen: set[str] = set()
+    for i, (subreddit, query) in enumerate(queries):
+        if i > 0:
+            time.sleep(_fetch_delay())
+        for row in _fetch_pullpush_posts(
+            subreddit=subreddit, query=query, size=per_query
+        ):
+            if not isinstance(row, dict):
+                continue
+            post = _post_from_pullpush(row)
+            if post and post.post_id and post.post_id not in seen:
+                seen.add(post.post_id)
+                yield post
 
 
 def _is_ci() -> bool:
@@ -336,7 +586,14 @@ def pick_topics_file_fallback(
             f"No Muslim/Arab topics in {topics_path}. "
             "Run sync_reddit_topics.sh locally or add niche posts to topics.txt."
         )
-    topics = _rank_topics_by_priority(niche_topics)
+    host_topics = _filter_host_persona_topics(niche_topics)
+    host_topics = [t for t in host_topics if is_quality_storytime_entry(t)]
+    if not host_topics:
+        raise RuntimeError(
+            f"No topics in {topics_path} match the channel host persona "
+            f"({host_persona_gender()}). Add male-host-friendly stories."
+        )
+    topics = _rank_topics_by_priority(host_topics)
     fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
     # Weighted pick: top-scored topics are more likely.
@@ -505,7 +762,9 @@ def _iter_submission_list(reddit, source: SubredditSource):
 
 
 def _iter_candidates_public(sources: list[SubredditSource]) -> Iterator[RedditPost]:
-    for source in sources:
+    for i, source in enumerate(sources):
+        if i > 0:
+            time.sleep(float(os.environ.get("REDDIT_FETCH_DELAY", "2.0")))
         payload = _fetch_listing_payload(source)
         if payload is None:
             continue
@@ -582,21 +841,31 @@ def pick_reddit_post(
         )
 
     niche = _filter_niche_posts(candidates)
-    if niche:
-        candidates = niche
-        print(
-            f"[reddit] {len(candidates)} Muslim/Arab niche post(s) after keyword filter.",
-            file=sys.stderr,
-        )
-    elif _should_use_topics_fallback():
-        print(
-            "[reddit] No Muslim/Arab matches on Reddit — falling back to topics.txt.",
-            file=sys.stderr,
-        )
-        return pick_topics_file_fallback(used_file=used_path)
+    if not niche:
+        candidates = []
     else:
+        candidates = _filter_host_persona_posts(niche)
+        candidates = [p for p in candidates if is_quality_storytime_post(p)]
+        if candidates:
+            print(
+                f"[reddit] {len(candidates)} post(s) after niche + host persona filter.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "[reddit] Niche posts found but none match channel host persona.",
+                file=sys.stderr,
+            )
+            candidates = []
+    if not candidates:
+        if _should_use_topics_fallback():
+            print(
+                "[reddit] No host-persona matches on Reddit — falling back to topics.txt.",
+                file=sys.stderr,
+            )
+            return pick_topics_file_fallback(used_file=used_path)
         raise RuntimeError(
-            "No Muslim/Arab keyword matches in Reddit results. "
+            "No Reddit posts match Muslim/Arab niche and channel host persona. "
             "Add topics.txt, set REDDIT_TOPICS_FALLBACK=1, or broaden subreddit sources."
         )
 
@@ -632,6 +901,16 @@ def collect_reddit_candidates(
     else:
         print("[reddit] Fetching via public JSON (run this on your Mac, not CI)…", file=sys.stderr)
         candidates = list(_iter_candidates_public(sources))
+        if not candidates:
+            print(
+                "[reddit] Public JSON blocked — using pullpush.io (Reddit archive)…",
+                file=sys.stderr,
+            )
+            candidates = list(
+                _iter_candidates_pullpush(
+                    list(PULLPUSH_HARVEST_BATCHES), per_query=per_source_limit
+                )
+            )
 
     seen: set[str] = set()
     unique: list[RedditPost] = []
@@ -640,7 +919,7 @@ def collect_reddit_candidates(
             seen.add(post.post_id)
             unique.append(post)
     unique.sort(key=lambda p: p.score, reverse=True)
-    return unique
+    return [p for p in unique if is_quality_storytime_post(p)]
 
 
 def sync_topics_file(
@@ -662,7 +941,10 @@ def sync_topics_file(
     new_entries: list[str] = []
     for post in posts:
         text = post.topic_text
-        if len(text) >= min_entry_chars and matches_muslim_arab_niche(text):
+        if (
+            len(text) >= min_entry_chars
+            and is_quality_storytime_entry(text)
+        ):
             new_entries.append(text)
         if len(new_entries) >= limit:
             break
@@ -692,6 +974,238 @@ def sync_topics_file(
     if len(new_entries) > 5:
         print(f"  … and {len(new_entries) - 5} more", file=sys.stderr)
     return added
+
+
+def harvest_persona_topics(
+    *,
+    limit: int = 100,
+    topics_file: Path | None = None,
+    merge: bool = False,
+    per_source_limit: int = 100,
+    batch: int = 0,
+    source: str = "auto",
+) -> int:
+    """Scrape Reddit for high-scoring posts matching niche + channel host persona."""
+    path = topics_file or Path(os.environ.get("TOPICS_FILE", "topics.txt"))
+    all_sources = (
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="muslim OR islamophobia OR arab OR middle eastern",
+            time_filter="all",
+            limit=100,
+        ),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="ramadan OR fasting OR halal OR iftar",
+            time_filter="all",
+            limit=100,
+        ),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="terrorist OR profiling OR airport OR TSA",
+            time_filter="all",
+            limit=100,
+        ),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="mosque OR quran OR jummah OR prayer",
+            time_filter="year",
+            limit=80,
+        ),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query='"against arabs" OR "muslim hate" OR islamophob',
+            time_filter="all",
+            limit=80,
+        ),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="cousin marriage OR arranged OR parents want",
+            time_filter="year",
+            limit=60,
+        ),
+        SubredditSource("MuslimLounge", kind="top", time_filter="year", limit=100),
+        SubredditSource("MuslimLounge", kind="hot", limit=80),
+        SubredditSource("ABCDesis", kind="top", time_filter="year", limit=100),
+        SubredditSource("ABCDesis", kind="hot", limit=80),
+        SubredditSource("islam", kind="top", time_filter="year", limit=80),
+        SubredditSource("muslim", kind="top", time_filter="year", limit=80),
+        SubredditSource("muslim", kind="hot", limit=60),
+        SubredditSource("arabs", kind="top", time_filter="year", limit=80),
+        SubredditSource("arabs", kind="hot", limit=60),
+        SubredditSource("ArabWorld", kind="hot", limit=50),
+        SubredditSource(
+            "teenagers",
+            kind="search",
+            search_query="convert OR reverted OR revert",
+            time_filter="year",
+            limit=50,
+        ),
+    )
+    batch_size = max(1, int(os.environ.get("REDDIT_HARVEST_BATCH_SIZE", "2")))
+    start = max(0, batch) * batch_size
+    end = start + batch_size
+    pullpush_queries = list(PULLPUSH_HARVEST_BATCHES[start:end])
+    if start >= len(all_sources) and not pullpush_queries:
+        raise RuntimeError(
+            f"Batch {batch} out of range (max batch "
+            f"{max((len(all_sources) - 1) // batch_size, (len(PULLPUSH_HARVEST_BATCHES) - 1) // batch_size)})."
+        )
+    sources = [
+        replace(s, limit=per_source_limit)
+        for s in all_sources[start:min(end, len(all_sources))]
+    ]
+    if sources:
+        print(
+            f"[reddit] Harvest batch {batch}: sources {start + 1}-"
+            f"{min(end, len(all_sources))}/{len(all_sources)}",
+            file=sys.stderr,
+        )
+    elif pullpush_queries:
+        print(
+            f"[reddit] Harvest batch {batch}: pullpush queries "
+            f"{start + 1}-{end}/{len(PULLPUSH_HARVEST_BATCHES)}",
+            file=sys.stderr,
+        )
+
+    candidates: list[RedditPost] = []
+    src = (source or "auto").strip().lower()
+    if src == "pullpush" and pullpush_queries:
+        batch_desc = ", ".join(
+            f"r/{s}" + (f" ({q})" if q else " top")
+            for s, q in pullpush_queries
+        )
+        print(
+            f"[reddit] Harvest batch {batch}: pullpush {batch_desc}",
+            file=sys.stderr,
+        )
+        candidates = list(
+            _iter_candidates_pullpush(pullpush_queries, per_query=per_source_limit)
+        )
+    elif src in ("auto", "reddit") and sources:
+        if _has_praw_credentials():
+            print("[reddit] Harvesting via PRAW/API…", file=sys.stderr)
+            candidates = list(_iter_candidates(_reddit_client(), sources))
+        else:
+            print("[reddit] Harvesting via public JSON…", file=sys.stderr)
+            candidates = list(_iter_candidates_public(sources))
+        if not candidates and pullpush_queries:
+            print(
+                "[reddit] Public JSON blocked — pullpush.io (Reddit archive)…",
+                file=sys.stderr,
+            )
+            candidates = list(
+                _iter_candidates_pullpush(pullpush_queries, per_query=per_source_limit)
+            )
+    elif src in ("auto", "pullpush") and pullpush_queries:
+        candidates = list(
+            _iter_candidates_pullpush(pullpush_queries, per_query=per_source_limit)
+        )
+
+    if not candidates:
+        raise RuntimeError(
+            "No Reddit posts fetched this batch. "
+            "Try --batch N+1, --source pullpush, or set REDDIT_CLIENT_ID/SECRET."
+        )
+
+    seen_ids: set[str] = set()
+    seen_titles: set[str] = set()
+    filtered: list[RedditPost] = []
+    for post in candidates:
+        if not post.post_id or post.post_id in seen_ids:
+            continue
+        title_key = re.sub(r"[^a-z0-9]+", " ", post.title.lower()).strip()
+        if title_key in seen_titles:
+            continue
+        text = post.topic_text
+        if len(text) < MIN_TOPIC_ENTRY_CHARS:
+            continue
+        if not is_quality_storytime_post(post):
+            continue
+        seen_ids.add(post.post_id)
+        seen_titles.add(title_key)
+        filtered.append(post)
+
+    filtered.sort(key=lambda p: (p.score, topic_priority_score(p.topic_text)), reverse=True)
+
+    existing: list[str] = []
+    existing_ids: set[str] = set()
+    existing_titles: set[str] = set()
+    if merge and path.is_file():
+        existing = load_topic_entries(path)
+        existing_ids = {topic_entry_id(t) for t in existing}
+        for t in existing:
+            for line in t.splitlines():
+                line = line.strip()
+                if line and not line.startswith("Reddit post from r/"):
+                    existing_titles.add(
+                        re.sub(r"[^a-z0-9]+", " ", line.lower()).strip()
+                    )
+                    break
+
+    chosen: list[RedditPost] = []
+    for post in filtered:
+        if len(chosen) >= limit:
+            break
+        eid = topic_entry_id(post.topic_text)
+        title_key = re.sub(r"[^a-z0-9]+", " ", post.title.lower()).strip()
+        if eid in existing_ids or title_key in existing_titles:
+            continue
+        chosen.append(post)
+
+    if not chosen:
+        raise RuntimeError(
+            "No new persona-matching Reddit posts found this batch. "
+            "Try --batch N+1, set REDDIT_CLIENT_ID/SECRET, or run on your Mac."
+        )
+    if len(chosen) < limit:
+        print(
+            f"[reddit] Warning: only {len(chosen)} new persona topics "
+            f"(wanted {limit}).",
+            file=sys.stderr,
+        )
+
+    entries = [post.topic_text for post in chosen]
+    combined = list(existing)
+    for entry in entries:
+        combined.append(entry)
+
+    path.write_text(TOPICS_ENTRY_SEP.join(combined) + "\n", encoding="utf-8")
+    print(
+        f"topics.txt: {len(combined)} posts (harvested {len(chosen)} this run) → {path}",
+        file=sys.stderr,
+    )
+    for post in chosen[:8]:
+        print(
+            f"  • score={post.score} r/{post.subreddit}: {_topic_preview(post.topic_text)!r}",
+            file=sys.stderr,
+        )
+    if len(chosen) > 8:
+        print(f"  … and {len(chosen) - 8} more", file=sys.stderr)
+    return len(chosen)
+
+
+def prune_topics_file(topics_file: Path | None = None) -> int:
+    """Drop meme/spam/female-persona topics from topics.txt."""
+    path = topics_file or Path(os.environ.get("TOPICS_FILE", "topics.txt"))
+    entries = load_topic_entries(path)
+    kept = [e for e in entries if is_quality_storytime_entry(e)]
+    removed = len(entries) - len(kept)
+    path.write_text(
+        (TOPICS_ENTRY_SEP.join(kept) + "\n") if kept else "",
+        encoding="utf-8",
+    )
+    print(
+        f"topics.txt: kept {len(kept)}, removed {removed} → {path}",
+        file=sys.stderr,
+    )
+    return removed
 
 
 def fetch_topic_for_pipeline(
@@ -730,6 +1244,23 @@ def _cli_sync_topics(args: argparse.Namespace) -> int:
         limit=args.limit,
         merge=not args.replace,
         subreddits=subs,
+    )
+    return 0
+
+
+def _cli_prune_topics(args: argparse.Namespace) -> int:
+    prune_topics_file(Path(args.out))
+    return 0
+
+
+def _cli_harvest_topics(args: argparse.Namespace) -> int:
+    harvest_persona_topics(
+        limit=args.limit,
+        topics_file=Path(args.out),
+        merge=args.merge,
+        per_source_limit=args.per_source,
+        batch=args.batch,
+        source=args.source,
     )
     return 0
 
@@ -815,6 +1346,57 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated subreddits (default: Muslim/Arab niche sources).",
     )
     sync.set_defaults(func=_cli_sync_topics)
+
+    harvest = sub.add_parser(
+        "harvest-topics",
+        help="Scrape top Reddit posts into topics.txt (niche + host persona filter).",
+    )
+    harvest.add_argument(
+        "--out",
+        default="topics.txt",
+        help="Output topics file (default: topics.txt).",
+    )
+    harvest.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="Max topics to write (sorted by Reddit score).",
+    )
+    harvest.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge with existing topics.txt instead of replacing.",
+    )
+    harvest.add_argument(
+        "--batch",
+        type=int,
+        default=0,
+        help="Source batch index (4 sources per batch). Run 0,1,2… for 20 at a time.",
+    )
+    harvest.add_argument(
+        "--source",
+        choices=("auto", "reddit", "pullpush"),
+        default="auto",
+        help="auto=Reddit then pullpush archive; pullpush=Reddit archive only.",
+    )
+    harvest.add_argument(
+        "--per-source",
+        type=int,
+        default=100,
+        help="Max posts to fetch per subreddit/search source.",
+    )
+    harvest.set_defaults(func=_cli_harvest_topics)
+
+    prune = sub.add_parser(
+        "prune-topics",
+        help="Remove low-quality / wrong-persona entries from topics.txt.",
+    )
+    prune.add_argument(
+        "--out",
+        default="topics.txt",
+        help="Topics file to clean (default: topics.txt).",
+    )
+    prune.set_defaults(func=_cli_prune_topics)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

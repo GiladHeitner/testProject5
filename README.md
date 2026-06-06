@@ -7,7 +7,7 @@ This bot generates Muslim/Arab teen storytime Shorts from Reddit or `topics.txt`
 - Generates a script with AI
 - Generates voiceover audio with ElevenLabs
 - Auto-creates subtitles (SRT) with Whisper
-- Picks a random gameplay video from `assets/gameplay`
+- Picks random Minecraft or Roblox gameplay from `assets/gameplay`
 - Starts from a random timestamp each run
 - Adds random popup images from `assets/popups`
 - Exports vertical short video to `output/short.mp4`

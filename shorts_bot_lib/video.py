@@ -8,10 +8,14 @@ import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from .runner import ffprobe_duration_seconds, run_ffmpeg_with_progress
 from .types import PopupImage
+
+GameplayFamily = Literal["roblox", "minecraft", "other"]
+
+_GAMEPLAY_EXTENSIONS = ("mp4", "mov", "mkv", "webm")
 
 # Gameplay files that should play at real-time speed (no 2x PTS ramp).
 _REALTIME_GAMEPLAY_FILENAMES = frozenset(
@@ -20,6 +24,66 @@ _REALTIME_GAMEPLAY_FILENAMES = frozenset(
     }
 )
 _DEFAULT_GAMEPLAY_SPEED = 2.0
+
+GAMEPLAY_CREDIT_BLOCKS: dict[GameplayFamily, str] = {
+    "roblox": (
+        "Gameplay Credit: Dope Gameplays\n"
+        "Roblox Parkour Gameplay No Copyright | Roblox Gameplay No Copyright | 33\n"
+        "https://www.youtube.com/shorts/8Vo-3dhM7lM\n"
+        "Licensed under Creative Commons Attribution."
+    ),
+    "minecraft": (
+        "Gameplay Credit: Minecraft Parkour Gameplay\n"
+        "Minecraft Gameplay No Copyright\n"
+        "Licensed under Creative Commons Attribution."
+    ),
+    "other": (
+        "Gameplay Credit: Background Gameplay\n"
+        "Licensed under Creative Commons Attribution."
+    ),
+}
+
+
+def classify_gameplay_family(gameplay_path: Path) -> GameplayFamily:
+    name = gameplay_path.name.lower()
+    if "roblox" in name:
+        return "roblox"
+    if "minecraft" in name:
+        return "minecraft"
+    return "other"
+
+
+def gameplay_credit_block(gameplay_path: Path) -> str:
+    return GAMEPLAY_CREDIT_BLOCKS[classify_gameplay_family(gameplay_path)]
+
+
+def list_gameplay_files(folder: Path) -> List[Path]:
+    ext_set = set(_GAMEPLAY_EXTENSIONS)
+    return sorted(
+        p
+        for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower().lstrip(".") in ext_set
+    )
+
+
+def pick_random_gameplay(folder: Path) -> Path:
+    """Pick Roblox or Minecraft at random, then a file from that family."""
+    items = list_gameplay_files(folder)
+    if not items:
+        raise FileNotFoundError(f"No matching files found in: {folder}")
+
+    by_family: dict[GameplayFamily, List[Path]] = {}
+    for path in items:
+        by_family.setdefault(classify_gameplay_family(path), []).append(path)
+
+    preferred = {
+        family: paths
+        for family, paths in by_family.items()
+        if family in ("roblox", "minecraft")
+    }
+    pool = preferred or by_family
+    family = random.choice(list(pool.keys()))
+    return random.choice(pool[family])
 
 
 def gameplay_speed_factor(gameplay_path: Path) -> float:
@@ -98,18 +162,32 @@ def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
         last_sfx = popup.sfx_path
 
 
+def _popup_sfx_gain(path: Path | None, base_volume: float) -> float:
+    """Per-SFX multiplier — clicks and discord chimes sit under narration."""
+    vol = max(0.0, float(base_volume))
+    if path is None:
+        return vol
+    name = path.name.lower()
+    if "mouse-click" in name:
+        return vol * 0.45
+    if "discord" in name:
+        return vol * 0.35
+    return vol
+
+
 def build_popup_sfx_audio_chain(
     popups: List[PopupImage],
     sfx_input_indices: dict,
     sfx_trim_seconds: float = 1.4,
     sfx_speed: float = 1.25,
-    sfx_volume: float = 0.2,
+    sfx_volume: float = 0.15,
+    narration_label: str = "narr",
 ) -> str:
     sfx_events = [p for p in popups if p.play_sfx and p.sfx_path is not None]
     if not sfx_events:
         return ""
 
-    chains = ["[1:a]aresample=44100,volume=1.0[abase]"]
+    chains = [f"[{narration_label}]aresample=44100[abase]"]
     for i, popup in enumerate(sfx_events):
         sfx_idx = sfx_input_indices.get(str(popup.sfx_path))
         if sfx_idx is None:
@@ -117,7 +195,7 @@ def build_popup_sfx_audio_chain(
         delay_ms = max(0, int(popup.start_sec * 1000))
         trim_s = max(0.15, float(sfx_trim_seconds))
         speed = min(2.0, max(0.5, float(sfx_speed)))
-        vol = max(0.0, float(sfx_volume))
+        vol = _popup_sfx_gain(popup.sfx_path, sfx_volume)
         # Some SFX files (notably mouse clicks) include leading silence which
         # makes them sound "late" vs the visual beat. Strip that before delay.
         pre = ""
@@ -217,7 +295,6 @@ def build_filter_complex(
     for i, popup in enumerate(popups, start=0):
         popup_len = max(0.2, popup.end_sec - popup.start_sec)
         fade_dur = min(0.25, popup_len * 0.35)
-        fade_out_start = max(popup.start_sec, popup.end_sec - fade_dur)
         # Reddit card feature disabled; preserve aspect ratio still works via
         # PopupImage.preserve_aspect / is_emoji. The dedicated reddit_card.png
         # branch is left commented out for an easy re-enable.
@@ -227,23 +304,39 @@ def build_filter_complex(
             if (popup.is_emoji or popup.preserve_aspect)
             else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
         )
+        is_gif = popup.path.suffix.lower() == ".gif"
+        pts_prefix = ""
+        if is_gif:
+            gif_speed = max(1.0, popup.playback_speed)
+            if gif_speed > 1.001:
+                pts_prefix = (
+                    f"setpts='(PTS-STARTPTS)/{gif_speed:.6f}+{popup.start_sec:.3f}/TB',"
+                )
+            else:
+                pts_prefix = f"setpts=PTS-STARTPTS+{popup.start_sec:.3f}/TB,"
+            fade_st = max(popup.start_sec, popup.end_sec - fade_dur)
+        else:
+            fade_st = max(popup.start_sec, popup.end_sec - fade_dur)
         filters_after_scale = "format=rgba"
         if popup.chroma_key:
             filters_after_scale += f",colorkey={popup.chroma_key}:0.32:0.08"
         if popup.use_fade:
             filters_after_scale += (
-                f",fade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f}:alpha=1"
+                f",fade=t=out:st={fade_st:.3f}:d={fade_dur:.3f}:alpha=1"
             )
-        chains.append(f"[{i + 2}:v]{scale_part}{filters_after_scale}[img{i}]")
+        chains.append(f"[{i + 2}:v]{pts_prefix}{scale_part}{filters_after_scale}[img{i}]")
 
     current = base_video
     for i, popup in enumerate(popups, start=0):
         next_label = f"v{i + 1}"
-        chains.append(
-            f"[{current}][img{i}]overlay="
+        overlay_opts = (
             f"x={popup.x}:y={popup.y}:"
             f"enable='between(t,{popup.start_sec:.3f},{popup.end_sec:.3f})'"
-            f"[{next_label}]"
+        )
+        if popup.path.suffix.lower() == ".gif":
+            overlay_opts += ":repeatlast=0"
+        chains.append(
+            f"[{current}][img{i}]overlay={overlay_opts}[{next_label}]"
         )
         current = next_label
 
@@ -275,7 +368,8 @@ def compose_video(
     popup_sfx_path: Path | None = None,
     popup_sfx_trim_seconds: float = 1.4,
     popup_sfx_speed: float = 1.25,
-    popup_sfx_volume: float = 0.55,
+    popup_sfx_volume: float = 0.15,
+    narration_volume: float = 2.4,
     bgm_path: Path | None = None,
     bgm_volume: float = 0.08,
     source_top_crop: int = 96,
@@ -325,8 +419,12 @@ def compose_video(
     )
     for popup in popup_images:
         if popup.path.suffix.lower() == ".gif":
+            source_len = max(
+                0.5,
+                (popup.end_sec - popup.start_sec) * max(1.0, popup.playback_speed),
+            )
             input_parts.append(
-                f"-ignore_loop 0 -t {target_duration:.3f} -i {shlex.quote(str(popup.path))}"
+                f"-t {source_len:.3f} -i {shlex.quote(str(popup.path))}"
             )
         else:
             input_parts.append(
@@ -352,8 +450,12 @@ def compose_video(
     if not burn_subtitles and srt_path.exists():
         input_parts.append(f"-i {shlex.quote(str(srt_path))}")
 
-    current_audio_label = "1:a"
-    audio_map = "-map 1:a "
+    narr_vol = max(0.5, float(narration_volume))
+    audio_prefix = f"[1:a]aresample=44100,volume={narr_vol:.2f}[narr]"
+    filter_complex = f"{audio_prefix};{filter_complex}"
+
+    current_audio_label = "narr"
+    audio_map = "-map [narr] "
     if sfx_input_indices:
         audio_chain = build_popup_sfx_audio_chain(
             popup_images,
@@ -361,6 +463,7 @@ def compose_video(
             sfx_trim_seconds=popup_sfx_trim_seconds,
             sfx_speed=popup_sfx_speed,
             sfx_volume=popup_sfx_volume,
+            narration_label=current_audio_label,
         )
         if audio_chain:
             filter_complex = f"{filter_complex};{audio_chain}"
@@ -369,7 +472,7 @@ def compose_video(
     if bgm_input_index >= 0:
         bgm_vol = max(0.0, float(bgm_volume))
         bgm_chain = (
-            f"[{current_audio_label}]aresample=44100,volume=1.0[abase2];"
+            f"[{current_audio_label}]aresample=44100[abase2];"
             f"[{bgm_input_index}:a]silenceremove=start_periods=1:start_duration=0.03:start_threshold=-45dB,atrim=0:{target_duration:.3f},asetpts=N/SR/TB,volume={bgm_vol:.3f}[bgm];"
             f"[abase2][bgm]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aoutmix]"
         )
@@ -392,7 +495,7 @@ def compose_video(
         + "-c:a aac -b:a 160k "
         + f"-metadata comment={shlex.quote(unique_mux_token)} "
         + "-movflags +faststart "
-        + "-shortest "
+        + f"-t {target_duration:.3f} "
         + shlex.quote(str(out_video_path))
     )
     if not burn_subtitles and srt_path.exists():
@@ -411,7 +514,7 @@ def compose_video(
             + "-metadata:s:s:0 language=eng "
             + f"-metadata comment={shlex.quote(unique_mux_token)} "
             + "-movflags +faststart "
-            + "-shortest "
+            + f"-t {target_duration:.3f} "
             + shlex.quote(str(out_video_path))
         )
     print(f"[step] begin render duration={target_duration:.2f}s", flush=True)

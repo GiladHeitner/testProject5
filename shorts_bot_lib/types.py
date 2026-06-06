@@ -20,6 +20,7 @@ class PopupImage:
     sfx_path: Path | None = None
     preserve_aspect: bool = False
     chroma_key: str | None = None  # e.g. "0x00FF00" for green-screen removal
+    playback_speed: float = 1.0  # >1 speeds up animated GIFs to fit the popup window
 
 
 @dataclass(frozen=True)
