@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import List, Literal
 
+from .image_pipeline import is_raster_image_file
 from .runner import ffprobe_duration_seconds, run_ffmpeg_with_progress
 from .types import PopupImage
 
@@ -374,6 +375,17 @@ def compose_video(
     bgm_volume: float = 0.08,
     source_top_crop: int = 96,
 ) -> float:
+    safe_popups: list[PopupImage] = []
+    for popup in popup_images:
+        if not popup.path.exists():
+            print(f"[render] skip missing popup: {popup.path.name}")
+            continue
+        if popup.path.suffix.lower() != ".gif" and not is_raster_image_file(popup.path):
+            print(f"[render] skip non-raster popup: {popup.path.name}")
+            continue
+        safe_popups.append(popup)
+    popup_images = safe_popups
+
     narration_duration = ffprobe_duration_seconds(narration_path)
     target_duration = duration_seconds if duration_seconds is not None else narration_duration
     gameplay_duration = ffprobe_duration_seconds(gameplay_path)

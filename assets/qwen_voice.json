@@ -1,0 +1,10 @@
+{
+  "mode": "custom",
+  "model": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "speaker": "Ryan",
+  "language": "English",
+  "instruct": "Speak fast and continuously like an energetic YouTube Shorts teen storyteller. No dramatic pauses between sentences. Casual rant energy, clear and hyped, natural not robotic.",
+  "design_instruct": "Male 17-year-old Arab Muslim teen, fast continuous YouTube Shorts narrator, no long pauses, engaging rant delivery",
+  "speed": 1.35,
+  "pitch": 0.0
+}

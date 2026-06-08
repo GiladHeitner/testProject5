@@ -32,6 +32,43 @@ WIKI_API = "https://en.wikipedia.org/w/api.php"
 MET_ISLAMIC_ART_DEPT = 14
 DEFAULT_CONTACT = "videobots@localhost"
 
+_RASTER_URL_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
+_NON_RASTER_URL_SUFFIXES = (".svg", ".pdf", ".djvu", ".tif", ".tiff")
+
+
+def _is_raster_image_url(url: str) -> bool:
+    path = (url or "").split("?", 1)[0].lower()
+    if any(path.endswith(ext) for ext in _NON_RASTER_URL_SUFFIXES):
+        return False
+    if any(path.endswith(ext) for ext in _RASTER_URL_SUFFIXES):
+        return True
+    # Wikimedia thumb URLs often omit extensions; allow those.
+    return "/thumb/" in path or "upload.wikimedia.org" in path
+
+
+def is_raster_image_file(path: Path) -> bool:
+    try:
+        return _is_raster_image_bytes(path.read_bytes())
+    except OSError:
+        return False
+
+
+def _is_raster_image_bytes(data: bytes) -> bool:
+    if not data or len(data) < 12:
+        return False
+    head = data[:32].lstrip()
+    if head.startswith(b"<?xml") or head.startswith(b"<svg") or b"<svg" in head[:256].lower():
+        return False
+    if data[:3] == b"\xff\xd8\xff":
+        return True
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
+
 
 def _user_agent() -> str:
     custom = os.environ.get("HTTP_USER_AGENT", "").strip()
@@ -297,7 +334,7 @@ def _wiki_page_image(titles: list[str]) -> ImageFetchResult | None:
             continue
         original = (page.get("original") or {})
         url = (original.get("source") or "").strip()
-        if url:
+        if url and _is_raster_image_url(url):
             return ImageFetchResult(url=url, source="wikimedia")
     return None
 
@@ -349,7 +386,7 @@ def _wiki_generator_search(query: str) -> ImageFetchResult | None:
     for page in pages.values():
         original = (page.get("original") or {})
         url = (original.get("source") or "").strip()
-        if url:
+        if url and _is_raster_image_url(url):
             return ImageFetchResult(url=url, source="wikimedia")
     return None
 
@@ -416,6 +453,12 @@ def download_image(result: ImageFetchResult, dst: Path, timeout: int = REQUEST_T
     content_type = (response.headers.get("Content-Type") or "").lower()
     if not content_type.startswith("image/"):
         print(f"[image_pipeline] download rejected non-image content-type: {content_type or 'unknown'}")
+        return False
+    if "svg" in content_type or not _is_raster_image_url(result.url):
+        print(f"[image_pipeline] download rejected non-raster image: {result.url[:80]}...")
+        return False
+    if not _is_raster_image_bytes(response.content):
+        print(f"[image_pipeline] download rejected invalid raster bytes from {result.url[:80]}...")
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_bytes(response.content)

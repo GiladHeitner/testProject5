@@ -59,8 +59,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: ${{ runner.os }}-qwen-tts-v1
+          key: ${{ runner.os }}-qwen-custom-voice-1.7b-v1
           restore-keys: |
+            ${{ runner.os }}-qwen-custom-voice-
             ${{ runner.os }}-qwen-tts-
 
       - name: Prefetch Qwen TTS model
@@ -72,7 +73,7 @@ jobs:
           import os, time
           from huggingface_hub import snapshot_download
 
-          model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+          model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
           token = os.environ.get("HF_TOKEN") or None
           last_err = None
           for attempt in range(6):

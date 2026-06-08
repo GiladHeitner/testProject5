@@ -18,6 +18,7 @@ from .text import (
     strip_paralinguistic_tags,
     strip_script_markup,
 )
+from .qwen_voice import load_qwen_voice_config, qwen_voice_env
 
 
 def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
@@ -45,21 +46,31 @@ def _split_for_tts(text: str, max_chars: int = 220) -> list[str]:
 
 
 def cloner_reference_audio_path(project_root: Path) -> Path:
-    """Reference clip for VoiceCloner (REF_AUDIO env override)."""
+    """Reference clip for clone mode (REF_AUDIO env or qwen_voice.json)."""
     ref = os.environ.get("REF_AUDIO", "").strip()
-    if ref:
-        ref_path = Path(ref).expanduser()
-        if not ref_path.is_absolute():
-            ref_path = (project_root / "VoiceCloner" / ref).resolve()
-        return ref_path
-    return (project_root / "assets" / "grove_3.m4a").resolve()
+    if not ref:
+        cfg = load_qwen_voice_config(project_root / "assets" / "qwen_voice.json")
+        ref = cfg.ref_audio
+    ref_path = Path(ref).expanduser()
+    if not ref_path.is_absolute():
+        for candidate in (
+            project_root / "VoiceCloner" / ref,
+            project_root / ref.lstrip("./"),
+        ):
+            if candidate.is_file():
+                return candidate.resolve()
+        return (project_root / "VoiceCloner" / ref).resolve()
+    return ref_path.resolve()
 
 
 def resolve_tts_engine(requested: str, project_root: Path) -> str:
-    """Pick cloner vs OpenAI (OpenAI only when explicitly requested or ref missing)."""
+    """Pick cloner vs OpenAI (OpenAI only when explicitly requested or ref missing in clone mode)."""
     engine = (requested or "cloner").strip().lower()
     if engine == "openai":
         return "openai"
+    cfg = load_qwen_voice_config(project_root / "assets" / "qwen_voice.json")
+    if cfg.mode in ("custom", "design"):
+        return "cloner"
     ref = cloner_reference_audio_path(project_root)
     if ref.is_file():
         return "cloner"
@@ -91,12 +102,18 @@ def generate_voiceover_from_cloner_script(
     script_text: str, out_audio_path: Path, project_root: Path, cloner_script: str
 ) -> None:
     run_clone_path = _resolve_cloner_script(project_root, cloner_script)
+    voice_cfg = load_qwen_voice_config(project_root / "assets" / "qwen_voice.json")
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
     env = os.environ.copy()
     env["TEXT"] = prepare_script_for_qwen_tts(script_text)
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
     env.setdefault("PYTHONUNBUFFERED", "1")
+    env.update(qwen_voice_env(voice_cfg, project_root))
+    print(
+        f"[tts] Qwen mode={voice_cfg.mode} speaker={voice_cfg.speaker} model={voice_cfg.model}",
+        flush=True,
+    )
 
     # Heuristic phase markers — match common substrings emitted by huggingface
     # / TTS pipelines so the UI's sub-progress bar moves while the model runs.

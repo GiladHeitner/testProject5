@@ -19,15 +19,63 @@ def strip_speed_ramp_hyphens(script_text: str) -> str:
     return cleaned.strip()
 
 
+_PARALINGUISTIC_TAG_RE = re.compile(r"\[([^\]]+)\]", re.IGNORECASE)
+
+# Maps script tags → Qwen CustomVoice/VoiceDesign instruct (not spoken words).
+_TAG_INSTRUCT: dict[str, str] = {
+    "sigh": "Speak with a frustrated sigh in your tone.",
+    "breath": "Brief inhale, then speak naturally.",
+    "slow breath": "Slow breath, then speak with tension.",
+    "pause": "Brief dramatic pause, then continue.",
+    "scoff": "Speak with dismissive scoffing energy.",
+    "laugh": "Speak with a short amused laugh in your tone.",
+    "chuckle": "Speak with a light chuckle.",
+    "groan": "Speak with an exasperated groan.",
+}
+
+
 def strip_paralinguistic_tags(script_text: str) -> str:
-    """Remove Qwen TTS director tags like [sigh] from display/subtitle text."""
-    cleaned = re.sub(
-        r"\[(?:sigh|breath|laugh|pause|scoff|groan|chuckle)\]",
-        "",
-        script_text,
-        flags=re.IGNORECASE,
-    )
+    """Remove [sigh]-style director tags from display/subtitle text."""
+    cleaned = _PARALINGUISTIC_TAG_RE.sub("", script_text or "")
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _tag_instruct(tag: str) -> str:
+    key = (tag or "").strip().lower()
+    if key in _TAG_INSTRUCT:
+        return _TAG_INSTRUCT[key]
+    for pattern, instruct in _TAG_INSTRUCT.items():
+        if pattern in key or key in pattern:
+            return instruct
+    return ""
+
+
+def split_script_for_qwen_delivery(script_text: str) -> list[tuple[str, str]]:
+    """Split script at [tags]. Returns [(delivery_instruct, spoken_text), ...]."""
+    text = script_text or ""
+    if not _PARALINGUISTIC_TAG_RE.search(text):
+        spoken = strip_paralinguistic_tags(strip_script_markup(text))
+        return [("", spoken)] if spoken else [("", text.strip())]
+
+    segments: list[tuple[str, str]] = []
+    pending_instruct = ""
+    pos = 0
+    for match in _PARALINGUISTIC_TAG_RE.finditer(text):
+        before = text[pos : match.start()].strip()
+        if before:
+            segments.append((pending_instruct, before))
+            pending_instruct = ""
+        tag_instruct = _tag_instruct(match.group(1))
+        if tag_instruct:
+            pending_instruct = tag_instruct
+        pos = match.end()
+    tail = text[pos:].strip()
+    if tail:
+        segments.append((pending_instruct, tail))
+    if not segments:
+        spoken = strip_paralinguistic_tags(strip_script_markup(text))
+        return [("", spoken)] if spoken else [("", "")]
+    return segments
 
 
 def strip_script_markup(script_text: str) -> str:
@@ -115,8 +163,11 @@ def format_omar_script(script: str) -> str:
 
 
 def prepare_script_for_qwen_tts(script_text: str) -> str:
-    """Normalize casing, then apply Omar slang phonetics. Keeps [sigh]-style tags."""
-    return format_omar_script(normalize_script_for_tts(script_text))
+    """Normalize casing + slang phonetics; one flat line (paragraph breaks cause TTS pauses)."""
+    cleaned = strip_paralinguistic_tags(script_text)
+    normalized = normalize_script_for_tts(cleaned)
+    flat = re.sub(r"\s+", " ", normalized).strip()
+    return format_omar_script(flat)
 
 
 def script_words_for_alignment(script_text: str) -> List[str]:

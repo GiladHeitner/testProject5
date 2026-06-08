@@ -47,14 +47,14 @@ SOURCE:
 {topic_line}
 
 Example script style (match this energy — male Muslim teen, no swearing, Muslim slang):
-[sigh] Why does my teacher think Ramadan fasting is just skipping meals?
+Why does my teacher think Ramadan fasting is just skipping meals?
 
-[breath] Wallah I'm sitting in class and my teacher keeps going on about how it's not healthy to skip meals like I'm on some diet trend. I tell her it's Ramadan and she says I need to focus on my studies, not starve myself. My friends exchange looks because they know how important this is to me. I feel my stomach twist, not from hunger but from frustration... The principal calls me in and says we can discuss accommodations, but I know that means eating alone in the office while everyone else is at lunch. I say no. He tells me I'm being difficult. The whole class is watching. I grab my stuff and walk out before they can call my parents. Half the school is going to think I'm just skipping lunch for fun. Subscribe before I get banned!
+Wallah I'm sitting in class and my teacher keeps going on about how it's not healthy to skip meals like I'm on some diet trend. I tell her it's Ramadan and she says I need to focus on my studies, not starve myself. My friends exchange looks because they know how important this is to me. I feel my stomach twist, not from hunger but from frustration... The principal calls me in and says we can discuss accommodations, but I know that means eating alone in the office while everyone else is at lunch. I say no. He tells me I'm being difficult. The whole class is watching. I grab my stuff and walk out before they can call my parents. Half the school is going to think I'm just skipping lunch for fun. Subscribe before I get banned!
 
 STYLE RULES (match these exactly):
 - NO PROFANITY: Never use swear words. Express anger through tone and slang instead.
 - SLANG: Use Muslim/Arab teen slang (wallah, yallah, habibi, inshallah, etc.) like a real diaspora kid — 1-3 times per script, natural.
-- TTS EMOTION TAGS: Sprinkle 2-5 bracket tags for the voice engine: [sigh], [breath], [laugh], [pause], [scoff]. Place at emotional beats (opening frustration, disbelief, punchlines). Tags are for TTS only — not spoken words.
+- NO STAGE DIRECTIONS: Do not include bracketed tags like [sigh] / [pause] / [breath] or any other actions.
 - NO GEOGRAPHY: Never name cities, states, or countries. Say "my school" or "at home", not place names. Strip place names from the source if needed.
 - Match the source's intensity; rant posts should sound like real angry teens, not a cleaned-up school essay
 - Write in normal sentence case (not ALL CAPS). Use "I'm" not "I'M". TTS reads ALL CAPS letter-by-letter (IDIOT sounds like I-D-I-O-T).
@@ -66,7 +66,7 @@ STYLE RULES (match these exactly):
 - Must rehook the person throughout the video
 - NEVER use double hyphens (--word--) or em dashes. Use commas or periods instead.
 - EVERYTHING IS IN THE PRESENT TENSE
-- Output spoken dialogue plus [sigh]-style TTS tags only. No other stage directions, no emojis, no section labels.
+- Output spoken dialogue only. No stage directions, no bracketed actions, no emojis, no section labels.
 - Dont drag out the end of the story by giving a lesson
 - End ON A CLIFFHANGER
 
