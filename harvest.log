@@ -1,0 +1,197 @@
+
+========== Harvest batch 0 / 11 ==========
+[reddit] Harvest batch 0: sources 1-2/17
+[reddit] Harvest batch 0: pullpush r/muslim top, r/MuslimLounge top
+[reddit] Warning: only 9 new persona topics (wanted 15).
+topics.txt: 29 posts (harvested 9 this run) → topics.txt
+  • score=805 r/MuslimLounge: 'I just took the Shahada and converted to Islam! Alhamdulillah!'
+  • score=773 r/MuslimLounge: 'It’s my first Ramadan as a Muslim.'
+  • score=671 r/Muslim: 'Who is she?'
+  • score=646 r/MuslimLounge: 'Brothers and Sisters, pray that you are never desensitized to the plight of our…'
+  • score=436 r/Muslim: 'Do not form your political opinion based on r/Afghanistan. None of the 10 mods …'
+  • score=416 r/Muslim: 'Doctor of the Poor | This is Dr Muhammad al-Mashaali from Egypt. He spent almos…'
+  • score=378 r/Muslim: 'What my son has suffered - his life before and after the war on Gaza'
+  • score=318 r/Muslim: 'Just converted to Islam'
+  … and 1 more
+
+Done batch 0. Next: ./harvest_topics.sh 1
+Pausing 45s before next batch…
+
+========== Harvest batch 1 / 11 ==========
+[reddit] Harvest batch 1: sources 3-4/17
+[reddit] Harvest batch 1: pullpush r/islam top, r/arabs top
+[reddit] Warning: only 8 new persona topics (wanted 15).
+topics.txt: 37 posts (harvested 8 this run) → topics.txt
+  • score=5663 r/islam: 'A video uploaded and later deleted by a Han Chinese man. In the video you can s…'
+  • score=4091 r/arabs: '19 years ago today the US bombed Bagdad. 1 million Iraqis dead. A war started w…'
+  • score=3748 r/islam: 'Bothers and sisters please upvote this and share it everywhere to show the worl…'
+  • score=2978 r/islam: 'Joan Hajjam, an Algerian player who plays for the French football club Nantes w…'
+  • score=2971 r/islam: 'Naeem Rashid, the man who tried to stop the New Zealand mosque shooter with his…'
+  • score=2872 r/islam: '15-year-old Taqwa Zahir from Palestine has memorised the Quran in 6 months. She…'
+  • score=2841 r/islam: 'May Allah have mercy on our brother Abu Bakr'
+  • score=800 r/arabs: 'On March 20 2003, exactly 18 years ago today, the United States began bombing B…'
+
+Done batch 1. Next: ./harvest_topics.sh 2
+Pausing 45s before next batch…
+
+========== Harvest batch 2 / 11 ==========
+[reddit] Harvest batch 2: sources 5-6/17
+[reddit] Harvest batch 2: pullpush r/ABCDesis top, r/ArabWorld top
+[reddit] Warning: only 1 new persona topics (wanted 15).
+topics.txt: 38 posts (harvested 1 this run) → topics.txt
+  • score=2052 r/ABCDesis: 'Gendered racism towards Indian (and, more generally, Asian) males needs to be a…'
+
+Done batch 2. Next: ./harvest_topics.sh 3
+Pausing 45s before next batch…
+
+========== Harvest batch 3 / 11 ==========
+[reddit] Harvest batch 3: sources 7-8/17
+[reddit] Harvest batch 3: pullpush r/MuslimLounge (islamophobia), r/MuslimLounge (school)
+topics.txt: 53 posts (harvested 15 this run) → topics.txt
+  • score=69 r/MuslimLounge: 'Islamophobia on the rise.'
+  • score=52 r/MuslimLounge: 'Ami I the only one who thinks the I am Malala book is a bit dodgy'
+  • score=40 r/MuslimLounge: 'Experience living in India'
+  • score=32 r/MuslimLounge: "If you aren't careful, your children, nieces and nephews may be being ***ually …"
+  • score=25 r/MuslimLounge: 'Is it me or are Muslims being super racist right now?'
+  • score=23 r/MuslimLounge: 'People lying about Islam.'
+  • score=21 r/MuslimLounge: 'My advice to every muslims on internet or even world to the extent'
+  • score=7 r/MuslimLounge: "I'm not getting any better."
+  … and 7 more
+
+Done batch 3. Next: ./harvest_topics.sh 4
+Pausing 45s before next batch…
+
+========== Harvest batch 4 / 11 ==========
+[reddit] Harvest batch 4: sources 9-10/17
+[reddit] Harvest batch 4: pullpush r/MuslimLounge (work), r/muslim (convert)
+topics.txt: 68 posts (harvested 15 this run) → topics.txt
+  • score=61 r/Muslim: 'I was permanently banned from r/Islam because…'
+  • score=54 r/MuslimLounge: 'I’ve kept it halal, but I’m struggling in silence.'
+  • score=46 r/MuslimLounge: 'To Allah We Belong, To Shall Him We Return. 21 Year Old Muslim Woman Found Dead…'
+  • score=45 r/MuslimLounge: 'My experience with LGBT Kafirs'
+  • score=39 r/MuslimLounge: 'I made an app where you have to read Quran before doomscrolling'
+  • score=37 r/Muslim: 'Jewish Police Officer Converts to Islam After Oct.7th w. Officer Mike'
+  • score=32 r/Muslim: 'Separation killing me'
+  • score=21 r/MuslimLounge: 'PLEASE MAKE DUA FOR MY LOST BIRD'
+  … and 7 more
+
+Done batch 4. Next: ./harvest_topics.sh 5
+Pausing 45s before next batch…
+
+========== Harvest batch 5 / 11 ==========
+[reddit] Harvest batch 5: sources 11-12/17
+[reddit] Harvest batch 5: pullpush r/muslim (ramadan), r/islam (convert)
+topics.txt: 83 posts (harvested 15 this run) → topics.txt
+  • score=66 r/islam: 'Do teen Muslims who commit suicide be in Jahannam forever?'
+  • score=63 r/islam: 'I’m thinking about converting to Islam, but there is still a doubt'
+  • score=51 r/islam: 'why should I convert/revert to islam'
+  • score=42 r/islam: 'Converting for a guy?'
+  • score=34 r/Muslim: "I don't know if that's halal or not. But it's wholesome."
+  • score=26 r/islam: 'I don’t believe my mom would support my curiosity of Islam.'
+  • score=19 r/islam: 'I would like to propose to a girl wich is a convert - How do I do ?'
+  • score=17 r/Muslim: "Assalamu aleykum, just thought I'd share : Gaza is relying on your donations. P…"
+  … and 7 more
+
+Done batch 5. Next: ./harvest_topics.sh 6
+Pausing 45s before next batch…
+
+========== Harvest batch 6 / 11 ==========
+[reddit] Harvest batch 6: sources 13-14/17
+[reddit] Harvest batch 6: pullpush r/islam (revert), r/arabs (discrimination)
+topics.txt: 98 posts (harvested 15 this run) → topics.txt
+  • score=198 r/islam: '“Muhammad SAW is the best of creation”'
+  • score=177 r/arabs: 'Decades after Palestinian anti discrimination activist was assassinated in terr…'
+  • score=148 r/islam: 'I love this ummah as a revert'
+  • score=95 r/arabs: 'Arabs For Black Lives - Six ways for Arabs to resist anti-Blackness'
+  • score=85 r/arabs: '[Serious] Why do you think many African &amp; Middle Eastern economies are not …'
+  • score=83 r/islam: 'Can a man live with two hearts?'
+  • score=65 r/arabs: 'Why the Turks online hate Arabs soo much, I never hated Turks in my life.'
+  • score=53 r/islam: 'Who is the first Muslim ?'
+  … and 7 more
+
+Done batch 6. Next: ./harvest_topics.sh 7
+Pausing 45s before next batch…
+
+========== Harvest batch 7 / 11 ==========
+[reddit] Harvest batch 7: sources 15-16/17
+[reddit] Harvest batch 7: pullpush r/ABCDesis (parents), r/ABCDesis (cousin)
+topics.txt: 113 posts (harvested 15 this run) → topics.txt
+  • score=295 r/ABCDesis: 'Pakistani Mother Who Killed Her Teen Daughter in Italy After She Refused to Mar…'
+  • score=130 r/ABCDesis: 'Stereotypes I hate about being South Asian'
+  • score=127 r/ABCDesis: 'How becoming a woman ready to marry has caused absolute mayhem in my family.'
+  • score=127 r/ABCDesis: 'Proud of this brave woman'
+  • score=85 r/ABCDesis: 'Humble appeal.  Please help save my cousin'
+  • score=71 r/ABCDesis: 'I’ve been depressed and my parents think the solution is…'
+  • score=70 r/ABCDesis: 'TIFU by assuming cousin marriages are a south asian norm'
+  • score=66 r/ABCDesis: 'British Asian visiting Canada for a wedding - and I’m terrified.'
+  … and 7 more
+
+Done batch 7. Next: ./harvest_topics.sh 8
+Pausing 45s before next batch…
+
+========== Harvest batch 8 / 11 ==========
+[reddit] Harvest batch 8: sources 17-17/17
+[reddit] Harvest batch 8: pullpush r/ABCDesis (arranged), r/teenagers (islamophobia)
+[reddit] pullpush skip r/teenagers q='islamophobia': HTTP Error 400: Bad Request
+topics.txt: 128 posts (harvested 15 this run) → topics.txt
+  • score=98 r/ABCDesis: 'TW: What to expect or prepare for as the first divorced, single mom in your Pak…'
+  • score=97 r/ABCDesis: 'How has the US’s ubiquitous hookup culture impacted you?'
+  • score=71 r/ABCDesis: 'Arranged Marriage Scene in the US'
+  • score=46 r/ABCDesis: 'Indian Matchmaking'
+  • score=34 r/ABCDesis: 'How did being a child of an arranged marriage affect you?'
+  • score=29 r/ABCDesis: 'How do you guys deal with arranged marriage?'
+  • score=28 r/ABCDesis: 'Experiences with arranged marriage?'
+  • score=27 r/ABCDesis: 'Does anyone else have parents who sleep in separate rooms?'
+  … and 7 more
+
+Done batch 8. Next: ./harvest_topics.sh 9
+Pausing 45s before next batch…
+
+========== Harvest batch 9 / 11 ==========
+[reddit] Harvest batch 9: pullpush queries 19-20/24
+[reddit] Harvest batch 9: pullpush r/teenagers (ramadan), r/teenagers (arab)
+[reddit] Warning: only 13 new persona topics (wanted 15).
+topics.txt: 141 posts (harvested 13 this run) → topics.txt
+  • score=3 r/teenagers: 'ramadan messed up my mental health fr 😔'
+  • score=3 r/teenagers: 'one hour before i start'
+  • score=3 r/teenagers: 'Racist school'
+  • score=2 r/teenagers: "sometimes I feel like I'm just not fit for society"
+  • score=1 r/teenagers: "I'm having a sweet 16 and I wanted a big party, so I invited 34 people but only…"
+  • score=1 r/teenagers: '126 to 103'
+  • score=1 r/teenagers: 'I feel guilty about being friends with a boy'
+  • score=1 r/teenagers: 'Im 17 and idk how to ask my mom anymore'
+  … and 5 more
+
+Done batch 9. Next: ./harvest_topics.sh 10
+Pausing 45s before next batch…
+
+========== Harvest batch 10 / 11 ==========
+[reddit] Harvest batch 10: pullpush queries 21-22/24
+[reddit] Harvest batch 10: pullpush r/teenagers (halal), r/teenagers (mosque)
+topics.txt: 156 posts (harvested 15 this run) → topics.txt
+  • score=40781 r/teenagers: "List of the shit we've been through (so far) in 2020"
+  • score=173 r/teenagers: 'For those of you who don’t know'
+  • score=29 r/teenagers: 'Since people seem to like my other pics from Jerusalem... This is the Dome of t…'
+  • score=27 r/teenagers: 'You guys heard about the guy who shot up a mosque at new zealand and while he w…'
+  • score=23 r/teenagers: "The crisis in Sudan has gotten to a point where it's too far"
+  • score=17 r/teenagers: 'Its fucking disgusting'
+  • score=15 r/teenagers: 'Christchurch Teenagers please stay safe'
+  • score=11 r/teenagers: 'As a Muslim Teenager'
+  … and 7 more
+
+Done batch 10. Next: ./harvest_topics.sh 11
+Pausing 45s before next batch…
+
+========== Harvest batch 11 / 11 ==========
+[reddit] Harvest batch 11: pullpush queries 23-24/24
+[reddit] Harvest batch 11: pullpush r/teenagers (profiling), r/teenagers (convert)
+[reddit] Warning: only 4 new persona topics (wanted 15).
+topics.txt: 160 posts (harvested 4 this run) → topics.txt
+  • score=13 r/teenagers: 'Muslims are not here to blow up the god damn school, got it?'
+  • score=3 r/teenagers: 'im on the run'
+  • score=1 r/teenagers: 'Christian women tied, forced to strip by Bajrang Dal members in Odisha'
+  • score=1 r/teenagers: 'Polypropylene: A Multidimensional Odyssey Through Synthesis, Metamaterial Engin…'
+
+Done batch 11. Next: ./harvest_topics.sh 12
+
+topics.txt: 162 entries
