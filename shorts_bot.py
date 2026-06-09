@@ -53,7 +53,11 @@ from shorts_bot_lib.script_ai import (
     generate_script,
 )
 from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
-from shorts_bot_lib.text import get_highlight_timestamps, strip_speed_ramp_hyphens
+from shorts_bot_lib.text import (
+    get_highlight_timestamps,
+    load_alignment_script,
+    strip_speed_ramp_hyphens,
+)
 from shorts_bot_lib.transcribe import (
     get_whisper_word_timestamps,
     transcribe_audio_to_srt,
@@ -149,7 +153,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--video-only", action="store_true")
     parser.add_argument("--popup-sfx", default="assets/sounds/mouse-click-sound.mp3")
-    parser.add_argument("--popup-sfx-volume", type=float, default=0.15)
+    parser.add_argument("--popup-sfx-volume", type=float, default=0.42)
     parser.add_argument("--popup-sfx-speed", type=float, default=1.25)
     parser.add_argument("--popup-sfx-trim-seconds", type=float, default=1.4)
     parser.add_argument(
@@ -735,6 +739,9 @@ def main() -> None:
     script_file.write_text(script, encoding="utf-8")
     _save_persona_snapshot(channel_persona, output_dir)
 
+    tts_script_file = output_dir / "tts_script.txt"
+    alignment_script = load_alignment_script(script, tts_script_file)
+
     # Step 2: voiceover
     step += 1
     narration_file = output_dir / "narration.mp3"
@@ -747,9 +754,10 @@ def main() -> None:
                 narration_file = raw_narration_file
             else:
                 raise RuntimeError("Missing output narration file for reuse mode.")
+        alignment_script = load_alignment_script(script, tts_script_file)
         if client is not None:
             narration_reference_segments = get_whisper_word_timestamps(
-                client, narration_file, script
+                client, narration_file, alignment_script
             )
     else:
         print_progress(step, total_steps, "Creating voiceover")
@@ -766,11 +774,14 @@ def main() -> None:
                 project_root=project_root,
                 cloner_script=args.adam_cloner_script,
             )
+        alignment_script = load_alignment_script(script, tts_script_file)
         if args.dynamic_speed and re.search(r"--([^-][\s\S]*?[^-])--", script):
             if client is None:
                 raise RuntimeError("OpenAI client missing; cannot use --dynamic-speed.")
             print("Applying dynamic speed ramps from --hyphen-wrapped-- phrases...")
-            raw_words = get_whisper_word_timestamps(client, raw_narration_file, script)
+            raw_words = get_whisper_word_timestamps(
+                client, raw_narration_file, alignment_script
+            )
             highlights = get_highlight_timestamps(script, raw_words)
             if highlights:
                 smart_speed_ramp(
@@ -787,7 +798,9 @@ def main() -> None:
         else:
             narration_file = raw_narration_file
         if client is not None:
-            narration_reference_segments = get_whisper_word_timestamps(client, narration_file, script)
+            narration_reference_segments = get_whisper_word_timestamps(
+                client, narration_file, alignment_script
+            )
 
     # Step 3: subtitles
     step += 1
@@ -802,7 +815,7 @@ def main() -> None:
                 client,
                 narration_file,
                 subtitle_file,
-                script_text=script,
+                script_text=alignment_script,
                 reference_segments=narration_reference_segments or None,
             )  # type: ignore[arg-type]
         elif old_srt_file.exists():
@@ -816,7 +829,7 @@ def main() -> None:
             client,
             narration_file,
             subtitle_file,
-            script_text=script,
+            script_text=alignment_script,
             reference_segments=narration_reference_segments or None,
         )  # type: ignore[arg-type]
         emoji_events_file.write_text(json.dumps(generated_emoji_events), encoding="utf-8")

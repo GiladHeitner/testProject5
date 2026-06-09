@@ -104,8 +104,11 @@ def generate_voiceover_from_cloner_script(
     run_clone_path = _resolve_cloner_script(project_root, cloner_script)
     voice_cfg = load_qwen_voice_config(project_root / "assets" / "qwen_voice.json")
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
+    tts_text = prepare_script_for_qwen_tts(script_text)
+    tts_script_path = out_audio_path.parent / "tts_script.txt"
+    tts_script_path.write_text(tts_text + "\n", encoding="utf-8")
     env = os.environ.copy()
-    env["TEXT"] = prepare_script_for_qwen_tts(script_text)
+    env["TEXT"] = tts_text
     env["OUTPUT"] = str(tmp_wav)
     env["USE_BATCH"] = "false"
     env.setdefault("PYTHONUNBUFFERED", "1")

@@ -1,4 +1,5 @@
 import argparse
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -90,6 +91,22 @@ def suffix_from_values(speed: float, pitch: float) -> str:
     speed_tag = f"{speed:.2f}".replace("-", "m")
     pitch_tag = f"{pitch:.2f}".replace("-", "m")
     return f"_speed_{speed_tag}_pitch_{pitch_tag}"
+
+
+def trim_tts_pauses(input_wav: Path, output_wav: Path, max_pause_sec: float = 0.04) -> None:
+    """Compress internal silences Qwen inserts at punctuation / phrase breaks."""
+    dur = f"{max_pause_sec:.3f}"
+    af = (
+        "silenceremove="
+        f"start_periods=1:start_duration={dur}:start_threshold=-42dB:detection=peak,"
+        "silenceremove="
+        f"stop_periods=-1:stop_duration={dur}:stop_threshold=-42dB:detection=peak"
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(input_wav), "-af", af, str(output_wav)],
+        check=True,
+        capture_output=True,
+    )
 
 
 def apply_speed_pitch(input_wav: Path, output_wav: Path, speed: float, pitch: float) -> None:
@@ -211,12 +228,20 @@ def main() -> None:
     speed_values = parse_csv_floats(args.speed_values)
     pitch_values = parse_csv_floats(args.pitch_values)
 
+    def _trim_in_place(path: Path) -> None:
+        trimmed = path.with_name(path.stem + "_trim.wav")
+        trim_tts_pauses(path, trimmed)
+        shutil.move(trimmed, path)
+
+    _trim_in_place(output_path)
+
     if not speed_values and not pitch_values:
         if args.speed == 1.0 and args.pitch == 0.0:
             _log(f"Saved TTS audio to: {output_path}")
             return
         transformed_path = output_path.with_name(output_path.stem + "_sp.wav")
         apply_speed_pitch(output_path, transformed_path, args.speed, args.pitch)
+        _trim_in_place(transformed_path)
         _log(f"Saved TTS audio to: {output_path}")
         _log(f"Saved speed/pitch version to: {transformed_path}")
         return

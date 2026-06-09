@@ -5,11 +5,25 @@ from __future__ import annotations
 import math
 import random
 import re
+from pathlib import Path
 from typing import List
 
 
 def normalize_word_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+CURRENT_STORY_YEAR = 2026
+
+
+def modernize_source_years(text: str, *, current_year: int = CURRENT_STORY_YEAR) -> str:
+    """Rewrite stale year refs in Reddit source so scripts feel current."""
+    if not text:
+        return text
+    out = text
+    for old in range(2010, current_year):
+        out = re.sub(rf"\b{old}\b", str(current_year), out)
+    return out
 
 
 def strip_speed_ramp_hyphens(script_text: str) -> str:
@@ -28,9 +42,6 @@ _TAG_INSTRUCT: dict[str, str] = {
     "slow breath": "Slow breath, then speak with tension.",
     "pause": "Brief dramatic pause, then continue.",
     "scoff": "Speak with dismissive scoffing energy.",
-    "laugh": "Speak with a short amused laugh in your tone.",
-    "chuckle": "Speak with a light chuckle.",
-    "groan": "Speak with an exasperated groan.",
 }
 
 
@@ -146,28 +157,97 @@ def normalize_script_for_tts(script_text: str) -> str:
     return "\n".join(lines) if len(lines) > 1 else (lines[0] if lines else "")
 
 
-_OMAR_SLANG_PHONETICS: dict[str, str] = {
-    "wallah": "wah-lah",
-    "yallah": "yah-lah",
-    "habibi": "hah-bee-bee",
-    "astaghfirullah": "ah-stug-feer-oo-lah",
-    "inshallah": "in-shah-lah",
-}
+# Qwen English TTS misreads many Arabic loanwords; respell without hyphens (hyphens add gaps).
+_SLANG_TTS_SPELLINGS: tuple[tuple[str, str], ...] = (
+    (r"\bharam\b", "huhraam"),
+    (r"\bhalal\b", "huhlal"),
+    (r"\bwallah\b", "walah"),
+    (r"\bwallahi\b", "walahi"),
+    (r"\byallah\b", "yallah"),
+    (r"\byalla\b", "yalla"),
+    (r"\bhabibi\b", "huhbeebee"),
+    (r"\bhabibti\b", "huhbeebtee"),
+    (r"\binshallah\b", "inshalluh"),
+    (r"\binsallah\b", "inshalluh"),
+    (r"\bmashallah\b", "mashalluh"),
+    (r"\bmasallah\b", "mashalluh"),
+    (r"\bdeen\b", "deen"),
+    (r"\bdua\b", "dooah"),
+    (r"\bsalah\b", "salaah"),
+    (r"\bsalat\b", "salaat"),
+    (r"\biftar\b", "iftaar"),
+    (r"\bsuhoor\b", "sohoor"),
+    (r"\bsuhur\b", "sohoor"),
+    (r"\bameen\b", "ahmeen"),
+    (r"\bsubhanallah\b", "subhannallah"),
+    (r"\bastaghfirullah\b", "istaghfirullah"),
+    (r"\bummah\b", "oommah"),
+    (r"\bquran\b", "kooraan"),
+    (r"\bhijab\b", "heejaab"),
+    (r"\bjannah\b", "jannuh"),
+)
+
+
+# Words that make Qwen insert laughs — 1:1 swaps only (word-count must match for alignment).
+_TTS_VOCAL_TRIGGER_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    (r"\blaughter\b", "mockery"),
+    (r"\blaughing\b", "mocking"),
+    (r"\blaughed\b", "mocked"),
+    (r"\blaughs\b", "mocks"),
+    (r"\blaugh\b", "mock"),
+    (r"\bchuckling\b", "snickering"),
+    (r"\bchuckled\b", "snickered"),
+    (r"\bchuckle\b", "snicker"),
+    (r"\bgiggling\b", "snickering"),
+    (r"\bgiggled\b", "snickered"),
+    (r"\bgiggle\b", "snicker"),
+    (r"\bhaha+\b", ""),
+    (r"\blol\b", ""),
+    (r"\blmao\b", ""),
+    (r"\bfunny\b", "absurd"),
+    (r"\bjoke\b", "prank"),
+    (r"\bjoking\b", "kidding"),
+)
+
+
+def neutralize_vocal_triggers_for_tts(script: str) -> str:
+    out = script or ""
+    for pattern, replacement in _TTS_VOCAL_TRIGGER_REPLACEMENTS:
+        out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def respell_muslim_slang_for_tts(script: str) -> str:
+    out = script or ""
+    for pattern, replacement in _SLANG_TTS_SPELLINGS:
+        out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
+    return out
 
 
 def format_omar_script(script: str) -> str:
-    """Phonetic spellings so Qwen's English engine reads Arab/Muslim slang naturally."""
-    for word, phonetic in _OMAR_SLANG_PHONETICS.items():
-        script = re.sub(rf"\b{re.escape(word)}\b", phonetic, script, flags=re.IGNORECASE)
-    return script
+    return respell_muslim_slang_for_tts(neutralize_vocal_triggers_for_tts(script))
 
 
 def prepare_script_for_qwen_tts(script_text: str) -> str:
-    """Normalize casing + slang phonetics; one flat line (paragraph breaks cause TTS pauses)."""
+    """One flat line; strip punctuation that makes Qwen insert long pauses."""
     cleaned = strip_paralinguistic_tags(script_text)
     normalized = normalize_script_for_tts(cleaned)
     flat = re.sub(r"\s+", " ", normalized).strip()
+    flat = flat.replace("—", " ").replace("–", " ")
+    flat = re.sub(r'["""]', "", flat)
+    flat = re.sub(r"[.!?…]+", " ", flat)
+    flat = re.sub(r"[,;:]+", " ", flat)
+    flat = re.sub(r"\s+", " ", flat).strip()
     return format_omar_script(flat)
+
+
+def load_alignment_script(display_script: str, tts_script_path: Path | None = None) -> str:
+    """Text that was (or would be) spoken — use for whisper/subtitle alignment."""
+    if tts_script_path and tts_script_path.is_file():
+        saved = tts_script_path.read_text(encoding="utf-8").strip()
+        if saved:
+            return saved
+    return prepare_script_for_qwen_tts(display_script)
 
 
 def script_words_for_alignment(script_text: str) -> List[str]:

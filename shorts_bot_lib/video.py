@@ -164,15 +164,15 @@ def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
 
 
 def _popup_sfx_gain(path: Path | None, base_volume: float) -> float:
-    """Per-SFX multiplier — clicks and discord chimes sit under narration."""
+    """Per-SFX multiplier — keep clicks/discord audible under narration."""
     vol = max(0.0, float(base_volume))
     if path is None:
         return vol
     name = path.name.lower()
     if "mouse-click" in name:
-        return vol * 0.45
+        return vol * 0.85
     if "discord" in name:
-        return vol * 0.35
+        return vol * 0.80
     return vol
 
 
@@ -181,7 +181,7 @@ def build_popup_sfx_audio_chain(
     sfx_input_indices: dict,
     sfx_trim_seconds: float = 1.4,
     sfx_speed: float = 1.25,
-    sfx_volume: float = 0.15,
+    sfx_volume: float = 0.42,
     narration_label: str = "narr",
 ) -> str:
     sfx_events = [p for p in popups if p.play_sfx and p.sfx_path is not None]
@@ -369,7 +369,7 @@ def compose_video(
     popup_sfx_path: Path | None = None,
     popup_sfx_trim_seconds: float = 1.4,
     popup_sfx_speed: float = 1.25,
-    popup_sfx_volume: float = 0.15,
+    popup_sfx_volume: float = 0.42,
     narration_volume: float = 2.7,
     bgm_path: Path | None = None,
     bgm_volume: float = 0.08,

@@ -99,8 +99,8 @@ def _two_pass_loudnorm(
     src: Path,
     dst: Path,
     *,
-    target_peak_db: float = -14.0,
-    target_rms_db: float = -20.0,
+    target_peak_db: float = -10.0,
+    target_rms_db: float = -16.0,
 ) -> bool:
     """Peak/RMS normalize SFX — default targets keep popups under narration."""
     measure_cmd = (

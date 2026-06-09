@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Tuple
 from openai import OpenAI
 
 from .text import (
+    CURRENT_STORY_YEAR,
+    modernize_source_years,
     strip_paralinguistic_tags,
     strip_script_markup,
     strip_speed_ramp_hyphens,
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
 
 
 ADAPTATION_BRIEF_PROMPT = """You are planning a YouTube Shorts rant script.
+
+TODAY IS {current_year}. The host is a 17-year-old Muslim Arab teen in {current_year}. Retell the source as happening now — never 2023 or earlier.
 
 SOURCE STORY (Reddit post or topic):
 {topic_line}
@@ -36,6 +40,8 @@ Keep it under 120 words."""
 
 SCRIPT_PROMPT_TEMPLATE = """
 This is the source material for a YouTube Shorts story (often a full Reddit post). Retell it in first person as the CHANNEL HOST below — this is their own story, venting to camera. Teen audience; keep it raw and authentic.
+
+TIMELINE: Today is {current_year}. Omar is 17. Everything happens in {current_year}. Never say 2023, 2024, or 2025 — if the source mentions old years, retell as happening now.
 
 CHANNEL HOST (same person every video):
 {persona_block}
@@ -55,6 +61,7 @@ STYLE RULES (match these exactly):
 - NO PROFANITY: Never use swear words. Express anger through tone and slang instead.
 - SLANG: Use Muslim/Arab teen slang (wallah, yallah, habibi, inshallah, etc.) like a real diaspora kid — 1-3 times per script, natural.
 - NO STAGE DIRECTIONS: Do not include bracketed tags like [sigh] / [pause] / [breath] or any other actions.
+- NO LAUGH WORDS: Never write laugh, laughter, funny, chuckle, giggle, haha, or lol — TTS will actually laugh. Say "mocking", "teasing", or "making fun of me" instead.
 - NO GEOGRAPHY: Never name cities, states, or countries. Say "my school" or "at home", not place names. Strip place names from the source if needed.
 - Match the source's intensity; rant posts should sound like real angry teens, not a cleaned-up school essay
 - Write in normal sentence case (not ALL CAPS). Use "I'm" not "I'M". TTS reads ALL CAPS letter-by-letter (IDIOT sounds like I-D-I-O-T).
@@ -165,6 +172,7 @@ def _generate_adaptation_brief(
     prompt = ADAPTATION_BRIEF_PROMPT.format(
         topic_line=topic_line,
         persona_block=_persona_block(persona),
+        current_year=CURRENT_STORY_YEAR,
     )
     try:
         resp = client.chat.completions.create(
@@ -186,7 +194,7 @@ def generate_script(
     *,
     persona: ChannelPersona | None = None,
 ) -> str:
-    topic_line = topic.strip() or (
+    topic_line = modernize_source_years(topic.strip()) or (
         "a Muslim or Arab teen dealing with Ramadan fasting at school, "
         "islamophobia, family pressure, or diaspora identity"
     )
@@ -195,6 +203,7 @@ def generate_script(
         persona_block=_persona_block(persona),
         adaptation_brief=brief,
         topic_line=topic_line,
+        current_year=CURRENT_STORY_YEAR,
     )
     resp = client.responses.create(
         model="gpt-4o",
