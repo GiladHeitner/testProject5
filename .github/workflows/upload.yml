@@ -55,14 +55,30 @@ jobs:
             -O assets/gameplay/roblox_part01.mov
           ls -lh assets/gameplay/
 
-      - name: Cache Hugging Face model files
+      - name: Free disk space for model cache
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Cache Qwen 1.7B CustomVoice model
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-qwen-custom-voice-1.7b-v1
-          restore-keys: |
-            ${{ runner.os }}-qwen-custom-voice-
-            ${{ runner.os }}-qwen-tts-
+          path: ~/.cache/huggingface/hub/models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice
+          key: ${{ runner.os }}-qwen-1.7b-custom-voice-v2
+
+      - name: Prune stale Hugging Face models
+        run: |
+          HF_HUB="$HOME/.cache/huggingface/hub"
+          KEEP="models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice"
+          shopt -s nullglob
+          for dir in "$HF_HUB"/models--Qwen--*; do
+            base="$(basename "$dir")"
+            if [ "$base" != "$KEEP" ]; then
+              echo "Removing stale model cache: $base"
+              rm -rf "$dir"
+            fi
+          done
+          df -h "$HOME"
 
       - name: Prefetch Qwen TTS model
         env:
