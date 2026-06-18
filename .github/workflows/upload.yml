@@ -60,16 +60,16 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - name: Cache Qwen 1.7B CustomVoice model
+      - name: Cache Qwen 0.6B Base model
         uses: actions/cache@v4
         with:
-          path: ~/.cache/huggingface/hub/models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice
-          key: ${{ runner.os }}-qwen-1.7b-custom-voice-v2
+          path: ~/.cache/huggingface/hub/models--Qwen--Qwen3-TTS-12Hz-0.6B-Base
+          key: ${{ runner.os }}-qwen-0.6b-base-v1
 
       - name: Prune stale Hugging Face models
         run: |
           HF_HUB="$HOME/.cache/huggingface/hub"
-          KEEP="models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice"
+          KEEP="models--Qwen--Qwen3-TTS-12Hz-0.6B-Base"
           shopt -s nullglob
           for dir in "$HF_HUB"/models--Qwen--*; do
             base="$(basename "$dir")"
@@ -89,7 +89,7 @@ jobs:
           import os, time
           from huggingface_hub import snapshot_download
 
-          model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+          model = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
           token = os.environ.get("HF_TOKEN") or None
           last_err = None
           for attempt in range(6):

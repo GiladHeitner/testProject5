@@ -2,20 +2,20 @@
 set -euo pipefail
 
 # Qwen3-TTS modes (see assets/qwen_voice.json):
-#   custom — preset speaker + style instruct (default, best for Omar Shorts)
+#   clone  — copy a reference wav/m4a (default; the voice that performed best)
+#   custom — preset speaker + style instruct
 #   design — voice from text description only (Qwen3-TTS-12Hz-1.7B-VoiceDesign)
-#   clone  — copy a reference wav/m4a (old behavior)
 
-QWEN_VOICE_MODE="${QWEN_VOICE_MODE:-custom}"
-REF_AUDIO="${REF_AUDIO:-../assets/grove_3.m4a}"
+QWEN_VOICE_MODE="${QWEN_VOICE_MODE:-clone}"
+REF_AUDIO="${REF_AUDIO:-[ElevenLabs Adam]Back ...... sayi.mp3}"
 REF_TEXT_FILE="${REF_TEXT_FILE:-transcript.txt}"
 TEXT="${TEXT:-The gilded age of the late nineteenth century was one of the most}"
 LANGUAGE="${LANGUAGE:-English}"
 SPEAKER="${SPEAKER:-Ryan}"
 VOICE_INSTRUCT="${VOICE_INSTRUCT:-Male 17-year-old Muslim Arab teen, energetic YouTube Shorts storyteller, casual rant delivery, engaging and hyped, clear articulation}"
-MODEL="${MODEL:-Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}"
+MODEL="${MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
 OUTPUT="${OUTPUT:-custom.wav}"
-SPEED="${SPEED:-1.12}"
+SPEED="${SPEED:-1.7}"
 PITCH="${PITCH:-0.0}"
 USE_BATCH="${USE_BATCH:-false}"
 SPEED_VALUES="${SPEED_VALUES:-0.85,1.0,1.15}"

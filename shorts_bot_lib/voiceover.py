@@ -1,4 +1,4 @@
-"""Narration generation: local voice cloner (Omar reference) + OpenAI TTS."""
+"""Narration generation: local voice cloner (ElevenLabs Adam reference) + OpenAI TTS."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from openai import OpenAI
 from .runner import print_sub_progress, run
 from .text import (
     normalize_script_for_tts,
-    prepare_script_for_qwen_tts,
     strip_paralinguistic_tags,
     strip_script_markup,
 )
@@ -104,7 +103,7 @@ def generate_voiceover_from_cloner_script(
     run_clone_path = _resolve_cloner_script(project_root, cloner_script)
     voice_cfg = load_qwen_voice_config(project_root / "assets" / "qwen_voice.json")
     tmp_wav = out_audio_path.with_suffix(".adam_tmp.wav")
-    tts_text = prepare_script_for_qwen_tts(script_text)
+    tts_text = strip_paralinguistic_tags(normalize_script_for_tts(script_text))
     tts_script_path = out_audio_path.parent / "tts_script.txt"
     tts_script_path.write_text(tts_text + "\n", encoding="utf-8")
     env = os.environ.copy()

@@ -1,10 +1,11 @@
 {
-  "mode": "custom",
-  "model": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "mode": "clone",
+  "model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
   "speaker": "Ryan",
   "language": "English",
-  "instruct": "Ultra fast YouTube Shorts rant, nonstop flow. Speak very quickly with almost zero pauses. Do not slow down at commas or periods. Energetic hyped teen storyteller. Never laugh, chuckle, or giggle — straight serious rant only. Pronounce Muslim Arabic words naturally like a diaspora teen (huhraam, walah, inshalluh, astagfeer as one quick word).",
-  "design_instruct": "Male 17-year-old Arab Muslim teen, ultra fast continuous YouTube Shorts narrator, no pauses, engaging rant delivery",
-  "speed": 1.72,
+  "instruct": "",
+  "design_instruct": "",
+  "ref_audio": "[ElevenLabs Adam]Back ...... sayi.mp3",
+  "speed": 1.7,
   "pitch": 0.0
 }
