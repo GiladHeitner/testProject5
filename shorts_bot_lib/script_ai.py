@@ -59,7 +59,7 @@ Wallah I'm sitting in class and my teacher keeps going on about how it's not hea
 
 STYLE RULES (match these exactly):
 - NO PROFANITY: Never use swear words. Express anger through tone and slang instead.
-- SLANG: Use Muslim/Arab teen slang (wallah, yallah, habibi, inshallah, etc.) like a real diaspora kid — 1-3 times per script, natural. Say "astaghfir" not the full "astaghfirullah" (voiceover garbles long forms).
+- SLANG: Use Muslim/Arab teen slang (wallah, yallah, habibi, inshallah, etc.) like a real diaspora kid — 1-3 times per script, natural. Never use "astaghfir" or "astaghfirullah" — the voiceover cannot pronounce them.
 - NO STAGE DIRECTIONS: Do not include bracketed tags like [sigh] / [pause] / [breath] or any other actions.
 - NO LAUGH WORDS: Never write laugh, laughter, funny, chuckle, giggle, haha, or lol — TTS will actually laugh. Say "mocking", "teasing", or "making fun of me" instead.
 - NO GEOGRAPHY: Never name cities, states, or countries. Say "my school" or "at home", not place names. Strip place names from the source if needed.
