@@ -31,6 +31,9 @@ _Last updated: 2026-06-28_
 - ✅ **P2 — Topic-diversity cooldown:** `classify_topic_theme()` + `_apply_theme_cooldown()` in `reddit_topics.py` (both reddit + topics.txt paths); history in `.github/used_themes.txt` (added to `upload.yml` commit step); env `TOPIC_THEME_COOLDOWN` (default 4). Tested — excludes recently-used themes. Kills the 10× "arranged marriage" run.
 - ✅ **Cadence — confirmed already at ~1/day**, no change needed (see §3 status of plan). cron-job.org "YoutubeUploader" fires 1×/day @ 8 AM; the 2 GitHub schedules that stacked on top were already removed.
 
+**Shipped 2026-06-28 (series mechanic):**
+- ✅ **Recurring-Omar Part 1 / Part 2 series** — `shorts_bot_lib/series.py` (pure, unit-tested in `tests/test_series.py`, 7 passing). ~30% of automated runs (`SERIES_PART1_PCT`) become a cliffhanger Part 1; next run resolves it as Part 2. State in `.github/series_state.json` (committed by workflow). Wired into `main()`; titles get `(Part 1)/(Part 2)`. Biggest sub-conversion lever per research §5.5. Test: `python tests/test_series.py`.
+
 **Not yet done / next up (need decisions or local verification):**
 - ❌ **CTA timing — on-screen TEXT CTA for muted viewers: NOT NEEDED (decided 2026-06-28).** Subtitles transcribe the FULL narration (Whisper, `transcribe.py`) with no subscribe-line stripping, so the closing "Subscribe so tomorrow's story finds you" line is already captioned + burned in. Muted viewers see the CTA as text already. The research's muted-CTA concern applies to audio-only-CTA channels, not us. (The ~20s mid-video verbal CTA is also redundant for 18–28s shorts.)
 - ⏳ **P1 — series / recurring-character mechanic** (biggest sub-conversion lever per §5.5): real feature needing design (how to generate + link Part 1/Part 2, consistent "Omar" branding). Needs user direction.

@@ -152,13 +152,13 @@ jobs:
         run: |
           mkdir -p .github
           touch .github/used_reddit.txt .github/used_topics.txt \
-                .github/used_themes.txt \
+                .github/used_themes.txt .github/series_state.json \
                 .github/reddit_post_id.txt .github/reddit_topic.txt \
                 .github/upload_registry.jsonl
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/used_reddit.txt .github/used_topics.txt \
-                  .github/used_themes.txt \
+                  .github/used_themes.txt .github/series_state.json \
                   .github/reddit_post_id.txt .github/reddit_topic.txt \
                   .github/upload_registry.jsonl
           if git diff --cached --quiet; then

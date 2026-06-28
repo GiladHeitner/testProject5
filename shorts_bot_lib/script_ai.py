@@ -228,6 +228,7 @@ def generate_script(
     topic: str = "",
     *,
     persona: ChannelPersona | None = None,
+    series_directive: str = "",
 ) -> str:
     topic_line = modernize_source_years(topic.strip()) or (
         "a Muslim or Arab teen dealing with Ramadan fasting at school, "
@@ -240,6 +241,9 @@ def generate_script(
         topic_line=topic_line,
         current_year=CURRENT_STORY_YEAR,
     )
+    # Series mechanic (Part 1 / Part 2) appends role-specific instructions.
+    if series_directive:
+        prompt = f"{prompt}{series_directive}"
     resp = client.responses.create(
         model="gpt-4o",
         input=prompt,

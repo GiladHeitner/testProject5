@@ -637,7 +637,23 @@ def main() -> None:
         if not topic_path.exists():
             raise FileNotFoundError(f"Topic file not found: {topic_path}")
         args.topic = topic_path.read_text(encoding="utf-8").strip()
-    if args.reddit_topic:
+    # --- Series mechanic: decide this run's role (automated Reddit path only) ---
+    from shorts_bot_lib import series
+
+    series_state_file = project_root / ".github" / "series_state.json"
+    series_pending = None
+    series_role = series.ROLE_STANDALONE
+    if args.reddit_topic and not (args.script or "").strip():
+        series_pending = series.load_pending(series_state_file)
+        series_role = series.decide_role(series_pending)
+    if series_role == series.ROLE_PART2 and series_pending is not None:
+        # Continue the saved story instead of consuming a fresh Reddit post.
+        args.topic = series_pending.topic
+        print(f"[series] Part 2 (finale) — continuing: {series_pending.title!r}")
+    elif series_role == series.ROLE_PART1:
+        print("[series] Part 1 (cliffhanger) — Part 2 will continue next run.")
+
+    if args.reddit_topic and series_role != series.ROLE_PART2:
         from shorts_bot_lib.reddit_topics import fetch_topic_for_pipeline, mark_post_used
 
         used_reddit = project_root / ".github" / "used_reddit.txt"
@@ -729,6 +745,7 @@ def main() -> None:
                 args.words,
                 topic=args.topic,
                 persona=channel_persona,
+                series_directive=series.script_directive(series_role, series_pending),
             )  # type: ignore[arg-type]
             clean_script = script.replace("*", "")
             print("\n--- Generated Script ---")
@@ -1045,6 +1062,10 @@ def main() -> None:
     # Keep the title clean (no #shorts / hashtag clutter) — hashtags live in the description.
     if description and "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts"
+    # Series: tag the title so viewers know to come back / that this is the finale.
+    _series_suffix = series.title_suffix(series_role)
+    if _series_suffix and _series_suffix.lower() not in title.lower():
+        title = f"{title}{_series_suffix}"
     tags = list(MUSLIM_SHORT_TAGS)
 
     metadata_file = output_dir / "metadata.txt"
@@ -1089,6 +1110,18 @@ def main() -> None:
         append_upload_registry(
             video_id, title=title, script=script, title_variant=title_variant
         )
+        # Series: persist/advance state only after a real upload.
+        if series_role == series.ROLE_PART1:
+            series.save_pending(
+                series.build_pending_from_part1(
+                    title=title, topic=args.topic, script=script
+                ),
+                series_state_file,
+            )
+            print("[series] Saved Part 1 state — next run produces Part 2.")
+        elif series_role == series.ROLE_PART2:
+            series.clear_pending(series_state_file)
+            print("[series] Part 2 uploaded — series state cleared.")
     else:
         print("Upload skipped. Run with --upload to publish.")
 
