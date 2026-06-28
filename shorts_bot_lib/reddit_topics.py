@@ -46,6 +46,8 @@ _PRIORITY_NICHE_KEYWORDS = re.compile(
 )
 
 # Meme titles, copypasta, awareness spam — not storytime.
+# Also rejects eating-disorder / self-harm / body-image topics: brand-unsafe,
+# YouTube age-gates/demonetizes them, and "fasting" otherwise pulls them in.
 _STORYTIME_REJECT_RE = re.compile(
     r"deep down we all know|repost it please|spread awareness|"
     r"concentration camps in china|step 1:|step 2:|"
@@ -54,7 +56,10 @@ _STORYTIME_REJECT_RE = re.compile(
     r"jedi and heres a tutorial|halal love\.\s*$|"
     r"^any muslims\?\s*$|just seeing if there are other muslims|"
     r"greatest nation on earth|happy 4th of july|proud americans|"
-    r"the weeknd|marawi 2\.0|^my 0pinion$|^my opinion$",
+    r"the weeknd|marawi 2\.0|^my 0pinion$|^my opinion$|"
+    r"anorexi|bulimi|eating disorder|\bed recovery\b|self[\s-]?harm|"
+    r"\bsuicid|\bcalorie|losing weight|weight loss|body image|"
+    r"\bpurg(e|ing)\b|\brelaps",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -126,12 +131,21 @@ _THEME_PATTERNS = [
 
 
 def classify_topic_theme(text: str) -> str:
-    """Bucket a topic into a coarse theme for the diversity cooldown."""
+    """Bucket a topic into a coarse theme for the diversity cooldown.
+
+    Scores ALL buckets by how many distinct keyword hits they get and returns
+    the strongest, so list order no longer makes early buckets (marriage,
+    islamophobia) swallow school/family/dating stories. Ties break by list order.
+    """
     t = text or ""
+    best_name = "other"
+    best_score = 0
     for name, pat in _THEME_PATTERNS:
-        if pat.search(t):
-            return name
-    return "other"
+        hits = len(pat.findall(t))
+        if hits > best_score:
+            best_score = hits
+            best_name = name
+    return best_name
 
 
 def _theme_cooldown_window() -> int:

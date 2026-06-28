@@ -54,10 +54,8 @@ ADAPTATION NOTES:
 SOURCE:
 {topic_line}
 
-Example script style (match this energy — male Muslim teen, no swearing, Muslim slang):
-Why does my teacher think Ramadan fasting is just skipping meals?
-
-Wallah I'm sitting in class and my teacher keeps going on about how it's not healthy to skip meals like I'm on some diet trend. I tell her it's Ramadan and she says I need to focus on my studies, not starve myself. My friends exchange looks because they know how important this is to me. I feel my stomach twist, not from hunger but from frustration... The principal calls me in and says we can discuss accommodations, but I know that means eating alone in the office while everyone else is at lunch. I say no. He tells me I'm being difficult. The whole class is watching. I grab my stuff and walk out before they can call my parents. Half the school is going to think I'm just skipping lunch for fun. Subscribe so tomorrow's story finds you.
+Example script style (match this ENERGY and STRUCTURE — male Muslim teen, no swearing, Muslim slang. Do NOT copy its topic; tell the SOURCE story above):
+{example_script}
 
 STYLE RULES (match these exactly):
 - NO PROFANITY: Never use swear words. Express anger through tone and slang instead.
@@ -78,7 +76,10 @@ STYLE RULES (match these exactly):
   from this line, so keep the payoff hidden).
 - Lean into conflict: discrimination, islamophobia, school rules, family pressure, Ramadan, diaspora — not generic teen drama
 - End with a subscribe line that gives a REASON TO RETURN, not a generic plea. It must contain the word "subscribe" and promise the next story, e.g. "Subscribe so tomorrow's story finds you" or "Subscribe, I post one of these every day." Do NOT use "subscribe before I get banned".
-- Must rehook the person throughout the video
+- RE-HOOK with a real escalation: about halfway through, drop a second curiosity spike that makes leaving impossible, e.g. "but that's not even the worst part" or "and then it got so much worse", then raise the stakes.
+- NO AI CLICHÉS. Never write: "little did I know", "my heart sank", "my stomach dropped", "exchange looks / exchanged glances", "I'll never forget", "to make matters worse", "needless to say". Use plain, specific teen language instead.
+- Keep 2-3 oddly specific concrete details from the source (an exact object, a thing someone literally said) — specifics make it feel real.
+- SAFE CONTENT: Never frame the story around eating disorders, dieting, calorie-counting, body image, self-harm, or weight. If the source is about that, refuse the angle and center the conflict on school/family/faith/identity instead. Ramadan fasting is religious devotion, never "starving" or a "diet".
 - NEVER use double hyphens (--word--) or em dashes. Use commas or periods instead.
 - EVERYTHING IS IN THE PRESENT TENSE
 - Output spoken dialogue only. No stage directions, no bracketed actions, no emojis, no section labels.
@@ -87,6 +88,22 @@ STYLE RULES (match these exactly):
 
 Write ONE complete script now.
 """
+
+
+# Rotating style exemplars — picked at random per generation so scripts don't all
+# converge on the same structure (the old single hardcoded example caused that).
+# Different SHAPES on purpose: public confrontation, betrayal, accusation, family
+# pressure, identity. None are eating-disorder/body-image themed.
+EXEMPLAR_SCRIPTS = [
+    # Public confrontation / authority
+    "My teacher just told the whole class my fasting is \"basically an eating thing\" and I lost it.\n\nWallah I'm sitting there and she says it in front of everyone like she's worried about me, but really she's making me the weird one. I tell her it's Ramadan, it's my faith, and she goes \"I just think you should put your grades first.\" The class is dead silent. Then this kid behind me mutters something and people start laughing. But that's not even the worst part. The principal hears about it and calls ME to the office, like I'm the problem. He slides a paper across the desk and tells me to sign it. I read the first line and my whole face goes cold. Subscribe so tomorrow's story finds you.",
+    # Betrayal by a friend
+    "My best friend since fourth grade just told the entire group chat the one secret I begged him to keep.\n\nYallah I trusted this guy with everything. So when I open my phone and see forty messages, my hands are literally shaking. He posted it word for word, with my name. People I've never even talked to are screenshotting it. I call him and he picks up laughing like it's nothing, says I'm \"too sensitive.\" And then he says something that tells me he planned this for weeks. The next morning I walk into school and everyone goes quiet at once. Someone taped something to my locker. Subscribe, I post one of these every day.",
+    # Family pressure / honor
+    "My parents sat me down at dinner and told me a man I've never met is coming to the house this weekend, for me.\n\nWallah I'm seventeen. I put my fork down and ask what they mean and my dad just keeps eating like he didn't drop a bomb on my whole life. My mom says it's just \"a conversation,\" but I see the way they already cleaned the good room. I tell them no and the table goes silent. Then my dad says one sentence about my cousin that makes my blood run cold, because I know exactly what happened to her. So now I have three days to figure out a plan. Subscribe so tomorrow's story finds you.",
+    # False accusation
+    "Security pulled me out of the lunch line in front of everyone because a teacher said I \"matched a description.\"\n\nWallah I didn't even do anything. One second I'm getting food, the next this guard has his hand on my shoulder telling me to come with him. Everyone's staring. They walk me past the whole cafeteria like I'm a criminal. In the office they ask me the same questions five times and won't tell me what I supposedly did. Then they pull up a camera and freeze the screen, and the kid in the video isn't even close to me, but the teacher who reported me is standing right there, and she won't look me in the eye. Subscribe, I post one of these every day.",
+]
 
 
 TITLE_PROMPT = """Create a viral YouTube Shorts TITLE for this story.
@@ -246,6 +263,7 @@ def generate_script(
         adaptation_brief=brief,
         topic_line=topic_line,
         current_year=CURRENT_STORY_YEAR,
+        example_script=random.choice(EXEMPLAR_SCRIPTS),
     )
     # Series mechanic (Part 1 / Part 2) appends role-specific instructions.
     if series_directive:
@@ -253,7 +271,9 @@ def generate_script(
     resp = client.responses.create(
         model="gpt-4o",
         input=prompt,
-        temperature=0.5,
+        # Higher temperature + the rotating exemplars keep scripts varied and
+        # less template-y (was 0.5, which read robotic/repetitive across uploads).
+        temperature=0.85,
     )
     return strip_speed_ramp_hyphens(resp.output_text.strip())
 
@@ -440,10 +460,10 @@ def build_dalle_prompt(client: OpenAI | None, script: str) -> str:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
     first_sentence = sentences[0] if sentences else cleaned[:200]
     fallback = (
-        "A hyper-saturated, surreal illustration of a teen boy in a school hallway "
-        "whose eyes are literally popping out in shock at a cafeteria lunch line. "
-        "A glowing sign reads \"NOT A DIET\" in neon red. Explosive composition. "
-        "Vertical 9:16."
+        "A hyper-saturated, surreal illustration of a shocked teen boy in a school "
+        "hallway clutching his phone, mouth open in disbelief, dramatic lighting and "
+        "exclamation-mark energy around him. Explosive comic-book composition. "
+        "Vertical 9:16. No text."
     )
     if client is None:
         return fallback
