@@ -43,6 +43,14 @@ class PendingSeries:
     topic: str         # original source topic/text, so Part 2 continues it
     summary: str       # what happened in Part 1 (trimmed script)
     cliffhanger: str   # the open loop Part 2 must resolve
+    part1_video_id: str = ""  # so Part 2 can pin a "Watch Part 1" link
+
+
+def part1_shorts_url(pending: Optional[PendingSeries]) -> str:
+    """Public Shorts URL for the pending Part 1, or '' if unknown."""
+    if pending is None or not pending.part1_video_id:
+        return ""
+    return f"https://www.youtube.com/shorts/{pending.part1_video_id}"
 
 
 # --- env knobs ----------------------------------------------------------------
@@ -81,6 +89,7 @@ def load_pending(path: Optional[Path] = None) -> Optional[PendingSeries]:
             topic=str(raw.get("topic", "")),
             summary=str(raw.get("summary", "")),
             cliffhanger=str(raw.get("cliffhanger", "")),
+            part1_video_id=str(raw.get("part1_video_id", "")),
         )
     except (KeyError, ValueError, TypeError):
         return None
@@ -173,7 +182,9 @@ def _extract_cliffhanger(script: str) -> str:
     return text[-200:].strip()
 
 
-def build_pending_from_part1(*, title: str, topic: str, script: str) -> PendingSeries:
+def build_pending_from_part1(
+    *, title: str, topic: str, script: str, video_id: str = ""
+) -> PendingSeries:
     """Capture a freshly generated Part 1 as the pending Part 2."""
     summary = " ".join((script or "").split())[:600]
     return PendingSeries(
@@ -182,4 +193,5 @@ def build_pending_from_part1(*, title: str, topic: str, script: str) -> PendingS
         topic=(topic or "").strip(),
         summary=summary,
         cliffhanger=_extract_cliffhanger(script),
+        part1_video_id=(video_id or "").strip(),
     )

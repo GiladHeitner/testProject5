@@ -68,7 +68,8 @@ if [[ $is_images_only -eq 1 ]]; then
   exit $?
 fi
 
-WORDS="${WORDS:-100}"
+# ~115 words ≈ 30-38s narrated — the 2026 Shorts sweet spot (was 100 ≈ 26-34s).
+WORDS="${WORDS:-115}"
 
 upload_args=(--upload)
 forward_args=()

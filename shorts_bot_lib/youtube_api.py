@@ -145,6 +145,7 @@ def post_pinned_comment(
     script: str,
     *,
     client: OpenAI | None = None,
+    lead_line: str = "",
 ) -> None:
     comment_text: str | None = None
     if client is not None and script.strip():
@@ -154,6 +155,9 @@ def post_pinned_comment(
             print(f"Pinned comment LLM failed, using fallback: {exc}")
     if not comment_text:
         comment_text = random.choice(_PINNED_COMMENT_FALLBACKS)
+    # Series Part 2: lead with a link back to Part 1 so viewers binge both.
+    if lead_line.strip():
+        comment_text = f"{lead_line.strip()}\n\n{comment_text}"
     try:
         response = youtube.commentThreads().insert(
             part="snippet",

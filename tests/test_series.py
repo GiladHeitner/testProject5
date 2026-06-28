@@ -76,7 +76,8 @@ def test_state_roundtrip_and_cliffhanger(tmp_path=None):
         "Part 2 tomorrow, subscribe so you don't miss it."
     )
     pending = series.build_pending_from_part1(
-        title="My Teacher Pulled Me Aside (Part 1)", topic="source story", script=script
+        title="My Teacher Pulled Me Aside (Part 1)", topic="source story",
+        script=script, video_id="abc123",
     )
     # Cliffhanger should be the last story beat, not the CTA.
     assert "subscribe" not in pending.cliffhanger.lower()
@@ -87,6 +88,10 @@ def test_state_roundtrip_and_cliffhanger(tmp_path=None):
     assert loaded is not None and loaded.part == 2
     assert loaded.title == "My Teacher Pulled Me Aside (Part 1)"
     assert loaded.topic == "source story"
+    # Part 1 video id roundtrips and yields a Shorts URL for the Part 2 pin.
+    assert loaded.part1_video_id == "abc123"
+    assert series.part1_shorts_url(loaded) == "https://www.youtube.com/shorts/abc123"
+    assert series.part1_shorts_url(None) == ""
 
     # A pending state forces the next run to Part 2...
     assert series.decide_role(loaded, enabled=True, pct=0) == series.ROLE_PART2

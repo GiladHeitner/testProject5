@@ -1106,7 +1106,13 @@ def main() -> None:
         from googleapiclient.discovery import build as _build
         _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
         video_id = video_url.split("v=")[-1]
-        post_pinned_comment(_yt, video_id, script, client=client)
+        # Series Part 2: pin a "Watch Part 1" link so viewers binge both halves.
+        part1_lead = ""
+        if series_role == series.ROLE_PART2:
+            url = series.part1_shorts_url(series_pending)
+            if url:
+                part1_lead = f"▶ Missed Part 1? Watch it here: {url}"
+        post_pinned_comment(_yt, video_id, script, client=client, lead_line=part1_lead)
         append_upload_registry(
             video_id, title=title, script=script, title_variant=title_variant
         )
@@ -1114,7 +1120,7 @@ def main() -> None:
         if series_role == series.ROLE_PART1:
             series.save_pending(
                 series.build_pending_from_part1(
-                    title=title, topic=args.topic, script=script
+                    title=title, topic=args.topic, script=script, video_id=video_id
                 ),
                 series_state_file,
             )
