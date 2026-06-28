@@ -68,8 +68,14 @@ STYLE RULES (match these exactly):
 - Match the source's intensity; rant posts should sound like real angry teens, not a cleaned-up school essay
 - Write in normal sentence case (not ALL CAPS). Use "I'm" not "I'M". TTS reads ALL CAPS letter-by-letter (IDIOT sounds like I-D-I-O-T).
 - Use aggressive punctuation (!, ..., ?) at emotional peaks to force faster, angrier delivery
-- Hook must be like a reddit post title after hook start a new paragraph
-- The FIRST sentence after the hook must be the same idea as the post title (viewer should recognize the title instantly)
+- HOOK — THE FIRST 3 SECONDS DECIDE EVERYTHING. The opening line must drop the
+  viewer straight into the most shocking, unfair, or tense moment of the story,
+  or hit them with a line they cannot scroll past. They must NEED to know what
+  happens next. Start a new paragraph after it.
+- Do NOT open with a slow setup or scene-setting ("So basically...", "Let me
+  tell you about...", "Today I..."). Open AT the conflict, mid-action.
+- The hook spikes curiosity but does NOT reveal how it ends (the title is built
+  from this line, so keep the payoff hidden).
 - Lean into conflict: discrimination, islamophobia, school rules, family pressure, Ramadan, diaspora — not generic teen drama
 - End with a subscribe line that gives a REASON TO RETURN, not a generic plea. It must contain the word "subscribe" and promise the next story, e.g. "Subscribe so tomorrow's story finds you" or "Subscribe, I post one of these every day." Do NOT use "subscribe before I get banned".
 - Must rehook the person throughout the video
