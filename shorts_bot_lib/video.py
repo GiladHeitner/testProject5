@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import shlex
@@ -221,6 +222,7 @@ def build_filter_complex(
     source_top_crop: int = 96,
     content_crop: str | None = None,
     gameplay_speed: float = _DEFAULT_GAMEPLAY_SPEED,
+    swap_starts: list[float] | None = None,
 ) -> str:
     chains = []
     top_crop = max(0, int(source_top_crop))
@@ -231,19 +233,40 @@ def build_filter_complex(
     pts_chain = "setpts=PTS-STARTPTS,"
     if speed > 1.0:
         pts_chain += f"setpts={(1.0 / speed):.6f}*PTS,"
-    # Center-crop a 9:16 portrait window, then scale to the Shorts canvas.
-    chains.append(
-        "[0:v]"
-        f"{crop_prefix}"
-        f"{letterbox_crop}"
+    base_crop = (
+        f"{crop_prefix}{letterbox_crop}"
         "crop=in_h*9/16:in_h:(iw-in_h*9/16)/2:0,"
-        f"trim=start={start_time:.3f}:duration={source_span:.3f},"
-        f"{pts_chain}"
-        "scale=1080:1920:flags=lanczos,"
-        "setsar=1,"
-        "fps=60"
-        "[v0]"
     )
+    if swap_starts and len(swap_starts) > 1:
+        # Split the source into N branches, trim a different window from each, and
+        # concat them so the gameplay visibly cuts to a new spot every few seconds.
+        n = len(swap_starts)
+        seg_span = source_span / n
+        speed_part = f"setpts={(1.0 / speed):.6f}*PTS," if speed > 1.0 else ""
+        src_labels = "".join(f"[src{i}]" for i in range(n))
+        chains.append(f"[0:v]{base_crop}split={n}{src_labels}")
+        for i, st in enumerate(swap_starts):
+            chains.append(
+                f"[src{i}]trim=start={st:.3f}:duration={seg_span:.3f},"
+                "setpts=PTS-STARTPTS[seg{}]".format(i)
+            )
+        seg_outs = "".join(f"[seg{i}]" for i in range(n))
+        chains.append(f"{seg_outs}concat=n={n}:v=1[vcat]")
+        chains.append(
+            f"[vcat]{speed_part}scale=1080:1920:flags=lanczos,setsar=1,fps=60[v0]"
+        )
+    else:
+        # Single continuous window (original behaviour).
+        chains.append(
+            "[0:v]"
+            f"{base_crop}"
+            f"trim=start={start_time:.3f}:duration={source_span:.3f},"
+            f"{pts_chain}"
+            "scale=1080:1920:flags=lanczos,"
+            "setsar=1,"
+            "fps=60"
+            "[v0]"
+        )
 
     # Optional hook intro clip overlay (short video) at the beginning.
     # This is intentionally a small square (PiP), not full-screen.
@@ -293,11 +316,16 @@ def build_filter_complex(
         # PopupImage.preserve_aspect / is_emoji. The dedicated reddit_card.png
         # branch is left commented out for an easy re-enable.
         # is_reddit_card = popup.path.name.lower() == "reddit_card.png"
-        scale_part = (
-            f"scale={popup.width}:-1,"
-            if (popup.is_emoji or popup.preserve_aspect)
-            else f"scale={popup.width}:{popup.width}:force_original_aspect_ratio=increase,crop={popup.width}:{popup.width},"
-        )
+        if popup.is_emoji or popup.preserve_aspect:
+            scale_part = f"scale={popup.width}:-1,"
+        else:
+            # Crop photos to a 4:5 portrait instead of a square: a square crop of a
+            # tall stock photo lops off heads/subjects. Taller box keeps faces.
+            pheight = int(popup.width * 1.25)
+            scale_part = (
+                f"scale={popup.width}:{pheight}:force_original_aspect_ratio=increase,"
+                f"crop={popup.width}:{pheight},"
+            )
         is_gif = popup.path.suffix.lower() == ".gif"
         pts_prefix = ""
         if is_gif:
@@ -404,6 +432,23 @@ def compose_video(
         input_parts.append(f"-i {shlex.quote(str(hook_video_path))}")
         hook_video_input_index = len(input_parts) - 1
 
+    # Gameplay swap: cut to a different part of the gameplay every few seconds so the
+    # background isn't one static clip (combats the "AI slop" look + keeps the eye moving).
+    # GAMEPLAY_SWAP_SECONDS=0 disables it.
+    swap_starts: list[float] | None = None
+    try:
+        swap_seconds = float(os.environ.get("GAMEPLAY_SWAP_SECONDS", "6") or 6)
+    except ValueError:
+        swap_seconds = 6.0
+    if swap_seconds > 0:
+        n_swaps = max(1, min(4, round(target_duration / swap_seconds)))
+        if n_swaps > 1:
+            seg_source = required_source_duration / n_swaps
+            max_start = gameplay_duration - seg_source - 0.2
+            if max_start > 1.0:
+                swap_starts = [random.uniform(0.0, max_start) for _ in range(n_swaps)]
+                print(f"Gameplay swap: {n_swaps} cuts (~{swap_seconds:.0f}s each)")
+
     content_crop = detect_content_crop(
         gameplay_path, start_time=start_time, source_top_crop=source_top_crop
     )
@@ -421,6 +466,7 @@ def compose_video(
         source_top_crop=source_top_crop,
         content_crop=content_crop,
         gameplay_speed=speed_factor,
+        swap_starts=swap_starts,
     )
     for popup in popup_images:
         if popup.path.suffix.lower() == ".gif":
@@ -476,21 +522,27 @@ def compose_video(
             audio_map = "-map [aout] "
     if bgm_input_index >= 0:
         bgm_vol = max(0.0, float(bgm_volume))
+        # Sidechain ducking: split narration into a mix copy + a key copy; the music
+        # is compressed *by the narration* so it dips under speech and swells back in
+        # the gaps (replaces the old static amix that left a flat voice/music balance).
         bgm_chain = (
-            f"[{current_audio_label}]aresample=44100[abase2];"
-            f"[{bgm_input_index}:a]silenceremove=start_periods=1:start_duration=0.03:start_threshold=-45dB,atrim=0:{target_duration:.3f},asetpts=N/SR/TB,volume={bgm_vol:.3f}[bgm];"
-            f"[abase2][bgm]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aoutmix]"
+            f"[{current_audio_label}]aresample=44100,asplit=2[narrmix][narrkey];"
+            f"[{bgm_input_index}:a]silenceremove=start_periods=1:start_duration=0.03:start_threshold=-45dB,"
+            f"atrim=0:{target_duration:.3f},asetpts=N/SR/TB,aresample=44100,volume={bgm_vol:.3f}[bgmraw];"
+            f"[bgmraw][narrkey]sidechaincompress=threshold=0.04:ratio=8:attack=15:release=350:makeup=1[bgmduck];"
+            f"[narrmix][bgmduck]amix=inputs=2:duration=first:normalize=0:dropout_transition=0[aoutmix]"
         )
         filter_complex = f"{filter_complex};{bgm_chain}"
         audio_map = "-map [aoutmix] "
 
-    # Master true-peak limiter: the narration is heavily boosted, so the summed
-    # mix would otherwise clip and swallow the SFX/BGM. Limiting the master keeps
-    # popups and piano audible instead of lost in clipping.
+    # Master: normalize to ~-14 LUFS (YouTube's loudness target) so uploads land at a
+    # consistent perceived volume, with true-peak protection, then a gentle safety
+    # limiter to catch any transient the single-pass loudnorm lets through.
     final_audio_label = "aoutmix" if bgm_input_index >= 0 else current_audio_label
     filter_complex = (
         f"{filter_complex};"
-        f"[{final_audio_label}]alimiter=level=false:limit=0.95[amaster]"
+        f"[{final_audio_label}]loudnorm=I=-14:TP=-1.5:LRA=11,"
+        f"alimiter=level=false:limit=0.97[amaster]"
     )
     audio_map = "-map [amaster] "
 
