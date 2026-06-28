@@ -24,22 +24,25 @@ _Last updated: 2026-06-28_
 **Shipped & committed:**
 - ✅ Removed GitHub `schedule:` crons from `upload.yml` (committed + pushed to main: `a4b9249..ecab486`).
 
-**Shipped, UNCOMMITTED in working tree (awaiting user go-ahead to commit):**
-- ✅ **P0 — Title rewrite:** new curiosity-gap `TITLE_PROMPT` in `script_ai.py` (no emoji/hashtags, withholds payoff, 30–50 chars front-loaded, universal-conflict framing, Studonomy-style few-shots). Removed forced `#Shorts` title append + cleaned fallback titles in `shorts_bot.py`.
-- ✅ **A/B harness:** `pick_title_variant()` sends ~20% of uploads through legacy `TITLE_PROMPT_LEGACY`; env `TITLE_AB_LEGACY_PCT` (default 20). Variant recorded as `title_variant` in `upload_registry.jsonl`.
-- ✅ **P1 (partial) — CTA text rewrite:** script CTA "subscribe before I get banned" → "Subscribe so tomorrow's story finds you" (`script_ai.py`); `_SUBSCRIBE_PHRASES` updated in `subscribe_cta.py` so the GIF overlay still times correctly.
-- ✅ **P2 — Topic-diversity cooldown:** `classify_topic_theme()` + `_apply_theme_cooldown()` in `reddit_topics.py` (both reddit + topics.txt paths); history in `.github/used_themes.txt` (added to `upload.yml` commit step); env `TOPIC_THEME_COOLDOWN` (default 4). Tested — excludes recently-used themes. Kills the 10× "arranged marriage" run.
-- ✅ **Cadence — confirmed already at ~1/day**, no change needed (see §3 status of plan). cron-job.org "YoutubeUploader" fires 1×/day @ 8 AM; the 2 GitHub schedules that stacked on top were already removed.
+**Shipped & committed/pushed to main (2026-06-28):**
+- ✅ **P0 — Title rewrite:** curiosity-gap `TITLE_PROMPT` (no emoji/hashtags, withholds payoff, 30–50 chars, universal-conflict framing). Removed forced `#Shorts` append + cleaned fallback titles.
+- ✅ **A/B harness:** `pick_title_variant()` — ~20% legacy (`TITLE_PROMPT_LEGACY`), env `TITLE_AB_LEGACY_PCT`; arm recorded as `title_variant` in `upload_registry.jsonl`.
+- ✅ **CTA text rewrite:** → "Subscribe so tomorrow's story finds you" (`script_ai.py` + `_SUBSCRIBE_PHRASES`).
+- ✅ **Topic-diversity cooldown:** `classify_topic_theme()` + `_apply_theme_cooldown()` (both selectors); `.github/used_themes.txt`; env `TOPIC_THEME_COOLDOWN`. Tested.
+- ✅ **Recurring-Omar Part 1 / Part 2 series** — `shorts_bot_lib/series.py` (unit-tested, `tests/test_series.py`, 7 passing). ~30% (`SERIES_PART1_PCT`) become cliffhanger Part 1; next run resolves as Part 2. State in `.github/series_state.json`. Titles get `(Part 1)/(Part 2)`. **Part 2 auto-pins a "Watch Part 1" link** (stores part1 video id). Workflow has a `series_part1_pct` dispatch input to force a Part 1.
+- ✅ **Stronger 3-second hook:** `SCRIPT_PROMPT` opens mid-conflict, no slow setup.
+- ✅ **Length bump:** `run.sh` WORDS 100→115 (~30–38s sweet spot). WATCH retention % — revert toward 100 if it drops.
+- ✅ **Cadence ~1/day confirmed** (cron-job.org "YoutubeUploader" 8 AM; GitHub schedules removed earlier).
+- ✅ **First series Part 1 uploaded** 2026-06-28: youtube.com/watch?v=mcBsUYjEGNM (rolled the legacy A/B title arm). Series state now pending → next run = Part 2.
 
-**Shipped 2026-06-28 (series mechanic):**
-- ✅ **Recurring-Omar Part 1 / Part 2 series** — `shorts_bot_lib/series.py` (pure, unit-tested in `tests/test_series.py`, 7 passing). ~30% of automated runs (`SERIES_PART1_PCT`) become a cliffhanger Part 1; next run resolves it as Part 2. State in `.github/series_state.json` (committed by workflow). Wired into `main()`; titles get `(Part 1)/(Part 2)`. Biggest sub-conversion lever per research §5.5. Test: `python tests/test_series.py`.
+**Confirmed already working (no change needed):**
+- ✅ Comment auto-replies: `comment-reply.yml` runs 3×/day, healthy (verified successful runs).
+- ❌ Muted-viewer text CTA: NOT NEEDED — captions transcribe the full narration incl. the subscribe line (already burned in).
 
-**Not yet done / next up (need decisions or local verification):**
-- ❌ **CTA timing — on-screen TEXT CTA for muted viewers: NOT NEEDED (decided 2026-06-28).** Subtitles transcribe the FULL narration (Whisper, `transcribe.py`) with no subscribe-line stripping, so the closing "Subscribe so tomorrow's story finds you" line is already captioned + burned in. Muted viewers see the CTA as text already. The research's muted-CTA concern applies to audio-only-CTA channels, not us. (The ~20s mid-video verbal CTA is also redundant for 18–28s shorts.)
-- ⏳ **P1 — series / recurring-character mechanic** (biggest sub-conversion lever per §5.5): real feature needing design (how to generate + link Part 1/Part 2, consistent "Omar" branding). Needs user direction.
-- ⏳ **P3** — reach-broadening universal hooks + a few searchable evergreen titles (94.8% Shorts-feed dependent today).
-- ⏳ Measure A/B after ~2 weeks, then set `TITLE_AB_LEGACY_PCT=0`.
-- 📌 **None of the working-tree pipeline edits are committed yet** — awaiting user's go-ahead.
+**Next up:**
+- ⏳ **#3 posting-time optimization** — blocked: Studio analytics "when viewers online" page too flaky to load. Low impact for Shorts. Revisit or set an evening cron slot on cron-job.org.
+- ⏳ Measure A/B after ~2 weeks → set `TITLE_AB_LEGACY_PCT=0`. Watch length-bump retention.
+- ⏳ Optional: tighten niche filter (a body-image topic slipped through), consistent visual/intro branding, searchable evergreen titles.
 
 **Research done (2026-06-28):** Deep-research workflow `wrmwhzc38` FAILED (synthesis-schema error); replaced with manual web-search pass. Findings in `CHANNEL_IMPROVEMENT_PLAN.md` §5. Key: (1) sub-conversion is now a 2026 *distribution* signal, so fixing it also lifts views; (2) YouTube's July-2025 "inauthentic content" policy targets repetition/low-human-value (monetization risk for us) — not AI use itself; (3) >10 Shorts/week dilutes reach; (4) titles truncate ~40 chars, hashtags-in-title hurt CTR (already addressed in P0); (5) series + mid-video/muted CTAs push conversion from ~0.12% toward 1–2%.
 
