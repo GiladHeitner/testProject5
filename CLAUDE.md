@@ -39,6 +39,14 @@ _Last updated: 2026-06-28_
 - ✅ Comment auto-replies: `comment-reply.yml` runs 3×/day, healthy (verified successful runs).
 - ❌ Muted-viewer text CTA: NOT NEEDED — captions transcribe the full narration incl. the subscribe line (already burned in).
 
+**Shipped 2026-06-28 (quality batch, from 3-agent code audit):**
+- ✅ **Scripts:** ED/body-image safety filter (`_STORYTIME_REJECT_RE` + SAFE CONTENT rule + new fallback image); 4 rotating exemplars (was 1 hardcoded → sameness); anti-cliché ban list + mid-video re-hook; script temp 0.5→0.85.
+- ✅ **Theme-cooldown bug fix:** `classify_topic_theme` now scores all buckets (was first-match → marriage/islamophobia swallowed others).
+- ✅ **Render (verified via isolated harness, frames inspected):** sidechain music ducking; `loudnorm` -14 LUFS master; popups cropped 4:5 portrait (was square → cut off faces); **gameplay swap** — background cuts to a new spot every ~6s (env `GAMEPLAY_SWAP_SECONDS`, 0 disables) via split/trim/concat in `build_filter_complex`.
+- Render verification harness: `scratchpad/render_harness.py` (synthetic narration, no TTS/OpenAI) — reuse for future `video.py` changes.
+
+**Known deferred items from the audit (not yet done):** wire the dead `hook_video.py` PiP intro back in (biggest visual fix, needs render verify); popup entrance "pop" animation; caption scale-pop + drop random caps; LLM story-quality judge for topic pick; wire unused emoji-caption layer. TTS 1.7× speed is memory-protected (Adam clone) — verify production path before touching.
+
 **Next up:**
 - ⏳ **#3 posting-time optimization** — blocked: Studio analytics "when viewers online" page too flaky to load. Low impact for Shorts. Revisit or set an evening cron slot on cron-job.org.
 - ⏳ Measure A/B after ~2 weeks → set `TITLE_AB_LEGACY_PCT=0`. Watch length-bump retention.
