@@ -4,10 +4,6 @@ on:
   repository_dispatch:
     types: [trigger-shorts] # This is your custom "button" name
   workflow_dispatch:
-  schedule:
-    # ~10am PT and ~6pm PT (UTC); small jitter step below
-    - cron: "0 18 * * *"
-    - cron: "0 2 * * *"
 
 permissions:
   contents: write
