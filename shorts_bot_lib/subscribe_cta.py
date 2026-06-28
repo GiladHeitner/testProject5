@@ -15,7 +15,10 @@ DEFAULT_CTA_WIDTH = int(os.environ.get("SUBSCRIBE_CTA_WIDTH", "920"))
 DEFAULT_CTA_Y = int(os.environ.get("SUBSCRIBE_CTA_Y", "780"))
 DEFAULT_CHROMA_KEY = os.environ.get("SUBSCRIBE_CTA_CHROMA", "0x00FF00")
 _SUBSCRIBE_PHRASES = (
-    "subscribe before i get banned",
+    "subscribe so tomorrow",
+    "subscribe so you",
+    "subscribe i post",
+    "subscribe before i get banned",  # legacy CTA (still detected if an old script slips through)
     "subscribe before",
     "subscribe",
 )

@@ -164,16 +164,9 @@ def pick_sfx_for_popups(popups: List[PopupImage], sounds_dir: Path) -> None:
 
 
 def _popup_sfx_gain(path: Path | None, base_volume: float) -> float:
-    """Per-SFX multiplier — keep clicks/discord audible under narration."""
-    vol = max(0.0, float(base_volume))
-    if path is None:
-        return vol
-    name = path.name.lower()
-    if "mouse-click" in name:
-        return vol * 0.85
-    if "discord" in name:
-        return vol * 0.80
-    return vol
+    """Per-SFX multiplier. SFX assets are loudness-normalized, so apply the
+    requested volume uniformly (no per-file ducking)."""
+    return max(0.0, float(base_volume))
 
 
 def build_popup_sfx_audio_chain(
@@ -490,6 +483,16 @@ def compose_video(
         )
         filter_complex = f"{filter_complex};{bgm_chain}"
         audio_map = "-map [aoutmix] "
+
+    # Master true-peak limiter: the narration is heavily boosted, so the summed
+    # mix would otherwise clip and swallow the SFX/BGM. Limiting the master keeps
+    # popups and piano audible instead of lost in clipping.
+    final_audio_label = "aoutmix" if bgm_input_index >= 0 else current_audio_label
+    filter_complex = (
+        f"{filter_complex};"
+        f"[{final_audio_label}]alimiter=level=false:limit=0.95[amaster]"
+    )
+    audio_map = "-map [amaster] "
 
     # Single-threaded filter graph keeps macOS pthread/swscale from exhausting.
     thread_flags = "-filter_threads 1 -filter_complex_threads 1 -threads 2 "

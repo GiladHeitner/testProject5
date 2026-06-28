@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import random
 import re
 from typing import TYPE_CHECKING, Tuple
 
@@ -55,7 +57,7 @@ SOURCE:
 Example script style (match this energy — male Muslim teen, no swearing, Muslim slang):
 Why does my teacher think Ramadan fasting is just skipping meals?
 
-Wallah I'm sitting in class and my teacher keeps going on about how it's not healthy to skip meals like I'm on some diet trend. I tell her it's Ramadan and she says I need to focus on my studies, not starve myself. My friends exchange looks because they know how important this is to me. I feel my stomach twist, not from hunger but from frustration... The principal calls me in and says we can discuss accommodations, but I know that means eating alone in the office while everyone else is at lunch. I say no. He tells me I'm being difficult. The whole class is watching. I grab my stuff and walk out before they can call my parents. Half the school is going to think I'm just skipping lunch for fun. Subscribe before I get banned!
+Wallah I'm sitting in class and my teacher keeps going on about how it's not healthy to skip meals like I'm on some diet trend. I tell her it's Ramadan and she says I need to focus on my studies, not starve myself. My friends exchange looks because they know how important this is to me. I feel my stomach twist, not from hunger but from frustration... The principal calls me in and says we can discuss accommodations, but I know that means eating alone in the office while everyone else is at lunch. I say no. He tells me I'm being difficult. The whole class is watching. I grab my stuff and walk out before they can call my parents. Half the school is going to think I'm just skipping lunch for fun. Subscribe so tomorrow's story finds you.
 
 STYLE RULES (match these exactly):
 - NO PROFANITY: Never use swear words. Express anger through tone and slang instead.
@@ -69,7 +71,7 @@ STYLE RULES (match these exactly):
 - Hook must be like a reddit post title after hook start a new paragraph
 - The FIRST sentence after the hook must be the same idea as the post title (viewer should recognize the title instantly)
 - Lean into conflict: discrimination, islamophobia, school rules, family pressure, Ramadan, diaspora — not generic teen drama
-- End the video by saying subscribe before I get banned!
+- End with a subscribe line that gives a REASON TO RETURN, not a generic plea. It must contain the word "subscribe" and promise the next story, e.g. "Subscribe so tomorrow's story finds you" or "Subscribe, I post one of these every day." Do NOT use "subscribe before I get banned".
 - Must rehook the person throughout the video
 - NEVER use double hyphens (--word--) or em dashes. Use commas or periods instead.
 - EVERYTHING IS IN THE PRESENT TENSE
@@ -82,6 +84,39 @@ Write ONE complete script now.
 
 
 TITLE_PROMPT = """Create a viral YouTube Shorts TITLE for this story.
+
+The video hook (first spoken line) is:
+{hook}
+
+CHANNEL HOST (the story is told by this creator, but the TITLE itself does NOT have to be first-person):
+{persona_block}
+
+GOAL: open a CURIOSITY GAP. The title must make a scroller NEED to watch to find out what happened. Tease the conflict; never reveal the outcome or the lesson.
+
+Rules:
+- WITHHOLD THE PAYOFF. Hint at something shocking/unfair/surprising WITHOUT saying how it ends.
+  Bad (spoils it): "17 & Pressured to Marry, Here's How I Said No"
+  Good (gap):       "My Parents Sat Me Down and Said I'm Getting Married Next Month"
+- 30–50 characters, ~4–7 words. Shorts-feed titles truncate near 40 chars, so FRONT-LOAD the hook in the first 30. Punchy.
+- Plain, conversational, specific. First-person ("My teacher...", "They made me...") OR
+  ambiguous third-person is fine — whichever is more clickable.
+- A scroller who is NOT Muslim should still want to click. Lead with the UNIVERSAL conflict
+  (teacher, cops, family, betrayal, being singled out); the niche payoff lives inside the video.
+- NO emojis. NO hashtags. NO "#shorts". Output the bare title text only.
+- No swearing; no city/country names; no ALL-CAPS words.
+
+Examples of the curiosity-gap style to match:
+- My Teacher Made Me Take This Off in Front of the Whole Class
+- They Called the Cops on Us for Being "Too Loud"
+- My School Suspended Me and Wouldn't Tell Me Why
+- Everyone Went Quiet When I Walked In, Then I Found Out Why
+- My Family Found Out Who I've Been Texting
+
+Output ONLY the title, nothing else."""
+
+
+# Old emoji/hashtag formula, kept only as the A/B control arm (see pick_title_variant).
+TITLE_PROMPT_LEGACY = """Create a viral YouTube Shorts TITLE for this story.
 
 The video hook (first spoken line) is:
 {hook}
@@ -294,6 +329,22 @@ def generate_comment_reply(
     return raw
 
 
+def pick_title_variant() -> str:
+    """A/B split for title style.
+
+    Returns "legacy" (old emoji/hashtag formula) for a fraction of uploads so we
+    keep a clean control arm to measure the curiosity-gap rewrite against; returns
+    "curiosity" otherwise. Control the legacy share with TITLE_AB_LEGACY_PCT
+    (default 20). Set it to 0 once the new formula is proven to ship 100% new.
+    """
+    try:
+        pct = float(os.environ.get("TITLE_AB_LEGACY_PCT", "20"))
+    except ValueError:
+        pct = 20.0
+    pct = max(0.0, min(100.0, pct))
+    return "legacy" if random.random() * 100.0 < pct else "curiosity"
+
+
 def generate_metadata(
     client: OpenAI,
     script: str,
@@ -301,6 +352,7 @@ def generate_metadata(
     *,
     persona: ChannelPersona | None = None,
     gameplay_credit: str = "",
+    title_variant: str = "curiosity",
 ) -> Tuple[str, str]:
     hook = extract_hook_text(script)
     block = _persona_block(persona)
@@ -314,8 +366,9 @@ def generate_metadata(
         )
         return (r.choices[0].message.content or "").strip()
 
+    title_prompt = TITLE_PROMPT_LEGACY if title_variant == "legacy" else TITLE_PROMPT
     title = strip_wrapping_quotes(
-        _call(TITLE_PROMPT.format(hook=hook, persona_block=block))
+        _call(title_prompt.format(hook=hook, persona_block=block))
     )
     description = (
         _call(DESCRIPTION_PROMPT.format(persona_block=block))
@@ -325,7 +378,7 @@ def generate_metadata(
 
     if not title:
         hook = script.split(".")[0].strip()
-        title = (hook[:82] + "...") if len(hook) > 85 else hook or "Muslim Teen Story You Won't Believe 😭"
+        title = (hook[:82] + "...") if len(hook) > 85 else hook or "I Wasn't Ready for What Happened Next"
     if include_description and not description:
         description = (
             "Muslim & Arab teen stories every day.\n"

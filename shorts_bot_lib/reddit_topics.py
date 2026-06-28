@@ -94,6 +94,103 @@ def topic_priority_score(text: str) -> int:
 def _rank_topics_by_priority(topics: list[str]) -> list[str]:
     return sorted(topics, key=topic_priority_score, reverse=True)
 
+
+# --- Topic-diversity cooldown -------------------------------------------------
+# The priority score boosts "arranged"/islamophobia heavily, which made the
+# channel publish 10+ near-identical "arranged marriage" shorts. A coarse theme
+# bucket + a short cooldown spreads picks across themes so consecutive uploads
+# don't repeat. (Repetition is also what YouTube's "inauthentic content" policy
+# targets — see CHANNEL_IMPROVEMENT_PLAN.md.)
+_THEME_PATTERNS = [
+    ("marriage", re.compile(
+        r"\b(arrang\w*|marry|marriage|married|wedding|nikah|engaged|engagement|"
+        r"proposal|suitor|rishta|spouse|husband|wife)\b", re.IGNORECASE)),
+    ("islamophobia", re.compile(
+        r"\b(islamophob\w*|racis\w*|hate crime|terrorist|bomb joke|profil\w*|"
+        r"slur|discriminat\w*|anti[\s-]?muslim|anti[\s-]?arab|muslim hate|arab hate)\b",
+        re.IGNORECASE)),
+    ("ramadan", re.compile(r"\b(ramadan|fasting|fast|iftar|suhoor|eid|sawm)\b", re.IGNORECASE)),
+    ("religion", re.compile(
+        r"\b(prayer|salah|mosque|masjid|quran|koran|jummah|imam|hijab|niqab|"
+        r"abaya|convert|revert|halal|haram)\b", re.IGNORECASE)),
+    ("dating", re.compile(
+        r"\b(crush|dating|girlfriend|boyfriend|texting|ex|flirt\w*|hookup|"
+        r"relationship)\b", re.IGNORECASE)),
+    ("school", re.compile(
+        r"\b(teacher|school|class|classroom|principal|suspend\w*|detention|"
+        r"exam|test|picture day|yearbook|homework|grade)\b", re.IGNORECASE)),
+    ("family", re.compile(
+        r"\b(parents?|mom|mum|dad|cousin|sibling|brother|sister|uncle|aunt|"
+        r"family|household|relatives?)\b", re.IGNORECASE)),
+]
+
+
+def classify_topic_theme(text: str) -> str:
+    """Bucket a topic into a coarse theme for the diversity cooldown."""
+    t = text or ""
+    for name, pat in _THEME_PATTERNS:
+        if pat.search(t):
+            return name
+    return "other"
+
+
+def _theme_cooldown_window() -> int:
+    """How many recent uploads' themes to avoid repeating (env: TOPIC_THEME_COOLDOWN)."""
+    try:
+        return max(0, int(os.environ.get("TOPIC_THEME_COOLDOWN", "4")))
+    except ValueError:
+        return 4
+
+
+def _theme_file_for(used_path: Path) -> Path:
+    return used_path.parent / "used_themes.txt"
+
+
+def _load_recent_themes(theme_path: Path, window: int) -> list[str]:
+    if window <= 0:
+        return []
+    try:
+        lines = [ln.strip() for ln in theme_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        return []
+    return lines[-window:]
+
+
+def mark_theme_used(theme: str, theme_path: Path, *, keep: int = 200) -> None:
+    """Append the chosen theme so future picks can cool it down."""
+    theme = (theme or "other").strip() or "other"
+    try:
+        existing = [ln.strip() for ln in theme_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        existing = []
+    existing.append(theme)
+    existing = existing[-keep:]
+    theme_path.parent.mkdir(parents=True, exist_ok=True)
+    theme_path.write_text("\n".join(existing) + "\n", encoding="utf-8")
+
+
+def _apply_theme_cooldown(pool: list, used_path: Path, theme_of) -> list:
+    """Drop pool items whose theme was used in the last N picks; keep order.
+
+    `theme_of` maps a pool item to its theme string. Falls back to the full
+    pool if every candidate matches a recent theme (so we never fail to pick).
+    """
+    window = _theme_cooldown_window()
+    if window <= 0:
+        return pool
+    recent = set(_load_recent_themes(_theme_file_for(used_path), window))
+    if not recent:
+        return pool
+    fresh = [item for item in pool if theme_of(item) not in recent]
+    if fresh:
+        return fresh
+    print(
+        f"[reddit] every candidate matches a recent theme {sorted(recent)}; "
+        f"ignoring theme cooldown this round.",
+        file=sys.stderr,
+    )
+    return pool
+
 # Posts must match at least one keyword (title + body) for this channel niche.
 _MUSLIM_ARAB_KEYWORDS = re.compile(
     r"\b("
@@ -596,10 +693,13 @@ def pick_topics_file_fallback(
     topics = _rank_topics_by_priority(host_topics)
     fresh = [t for t in topics if topic_entry_id(t) not in used_ids]
     pool = fresh if fresh else topics
+    pool = _apply_theme_cooldown(pool, used_path, classify_topic_theme)
     # Weighted pick: top-scored topics are more likely.
     top = pool[: min(8, len(pool))]
     weights = [max(1, topic_priority_score(t)) for t in top]
     chosen = random.choices(top, weights=weights, k=1)[0]
+    chosen_theme = classify_topic_theme(chosen)
+    mark_theme_used(chosen_theme, _theme_file_for(used_path))
     post_id = topic_entry_id(chosen)
     print(f"[reddit] topics.txt: {_topic_preview(chosen)!r}", file=sys.stderr)
     return RedditPost(
@@ -873,13 +973,16 @@ def pick_reddit_post(
     fresh = [p for p in candidates if p.post_id not in used_ids]
     pool = fresh if fresh else candidates
     pool.sort(key=lambda p: (topic_priority_score(p.topic_text), p.score), reverse=True)
+    pool = _apply_theme_cooldown(pool, used_path, lambda p: classify_topic_theme(p.topic_text))
     top_n = min(8, len(pool))
     top = pool[:top_n]
     weights = [max(1, topic_priority_score(p.topic_text)) for p in top]
     chosen = random.choices(top, weights=weights, k=1)[0]
+    chosen_theme = classify_topic_theme(chosen.topic_text)
+    mark_theme_used(chosen_theme, _theme_file_for(used_path))
     print(
         f"Reddit topic: r/{chosen.subreddit} | score={chosen.score} | "
-        f"{chosen.title[:72]!r}"
+        f"theme={chosen_theme} | {chosen.title[:72]!r}"
     )
     print(f"Permalink: {chosen.permalink}")
     return chosen

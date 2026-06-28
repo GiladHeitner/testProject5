@@ -51,6 +51,7 @@ from shorts_bot_lib.script_ai import (
     MUSLIM_SHORT_TAGS,
     generate_metadata,
     generate_script,
+    pick_title_variant,
 )
 from shorts_bot_lib.subtitles import read_srt_segments, write_ass_from_segments
 from shorts_bot_lib.text import (
@@ -153,7 +154,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--video-only", action="store_true")
     parser.add_argument("--popup-sfx", default="assets/sounds/mouse-click-sound.mp3")
-    parser.add_argument("--popup-sfx-volume", type=float, default=0.90)
+    parser.add_argument("--popup-sfx-volume", type=float, default=1.0)
     parser.add_argument("--popup-sfx-speed", type=float, default=1.25)
     parser.add_argument("--popup-sfx-trim-seconds", type=float, default=1.4)
     parser.add_argument(
@@ -169,7 +170,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
              "plays assets/discord-notification.mp3 when present.",
     )
     parser.add_argument("--bgm-path", default="assets/BackgroundMusic.mp3")
-    parser.add_argument("--bgm-volume", type=float, default=0.24)
+    parser.add_argument("--bgm-volume", type=float, default=0.75)
     parser.add_argument(
         "--gameplay-path",
         default=None,
@@ -471,6 +472,7 @@ def _run_upload_only(
     print_progress(1, 2, "Generating metadata")
     title = ""
     description = ""
+    title_variant = pick_title_variant()
     if client is not None and script:
         title, description = generate_metadata(
             client,
@@ -478,12 +480,12 @@ def _run_upload_only(
             include_description=not args.no_description,
             persona=channel_persona,
             gameplay_credit=gameplay_credit,
+            title_variant=title_variant,
         )
     if not title:
         hook = script.split(".")[0].strip() if script else ""
         title = (hook[:82] + "...") if len(hook) > 85 else (hook or "Crazy Story You Won't Believe")
-    if "#shorts" not in title.lower():
-        title = f"{title} #Shorts"
+    # Keep the title clean (no #shorts / hashtag clutter) — hashtags live in the description.
     if description and "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts"
     tags = list(MUSLIM_SHORT_TAGS)
@@ -507,7 +509,9 @@ def _run_upload_only(
             _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
             video_id = video_url.split("v=")[-1]
             post_pinned_comment(_yt, video_id, script, client=client)
-            append_upload_registry(video_id, title=title, script=script)
+            append_upload_registry(
+                video_id, title=title, script=script, title_variant=title_variant
+            )
         except Exception as exc:
             print(f"Could not post pinned comment: {exc}")
 
@@ -1019,6 +1023,7 @@ def main() -> None:
     # Step 6: metadata
     step += 1
     print_progress(step, total_steps, "Generating metadata")
+    title_variant = pick_title_variant()
     if client is not None:
         title, description = generate_metadata(
             client,
@@ -1026,18 +1031,18 @@ def main() -> None:
             include_description=not args.no_description,
             persona=channel_persona,
             gameplay_credit=gameplay_credit_block(gameplay_file),
+            title_variant=title_variant,
         )
     else:
         hook = script.split(".")[0].strip()
         title = (hook[:82] + "...") if len(hook) > 85 else hook
-        title = title or "Muslim Teen Story You Won't Believe 😭 #shorts #muslim"
+        title = title or "I Wasn't Ready for What Happened Next"
         description = "" if args.no_description else (
             "Subscribe for more storytime shorts!\n#shorts #storytime #schoolstory"
         )
         if description:
             description = f"{description}\n\n{gameplay_credit_block(gameplay_file)}"
-    if "#shorts" not in title.lower():
-        title = f"{title} #Shorts"
+    # Keep the title clean (no #shorts / hashtag clutter) — hashtags live in the description.
     if description and "#shorts" not in description.lower():
         description = f"{description}\n\n#Shorts"
     tags = list(MUSLIM_SHORT_TAGS)
@@ -1081,7 +1086,9 @@ def main() -> None:
         _yt = _build("youtube", "v3", credentials=get_youtube_credentials())
         video_id = video_url.split("v=")[-1]
         post_pinned_comment(_yt, video_id, script, client=client)
-        append_upload_registry(video_id, title=title, script=script)
+        append_upload_registry(
+            video_id, title=title, script=script, title_variant=title_variant
+        )
     else:
         print("Upload skipped. Run with --upload to publish.")
 

@@ -191,9 +191,14 @@ def append_upload_registry(
     *,
     title: str,
     script: str,
+    title_variant: str = "",
     registry_path: Path | None = None,
 ) -> None:
-    """Append one upload record for the comment replier (JSONL)."""
+    """Append one upload record for the comment replier (JSONL).
+
+    title_variant records which A/B title formula produced this upload
+    ("curiosity" or "legacy") so performance can be compared later.
+    """
     path = registry_path or Path(
         os.environ.get("UPLOAD_REGISTRY_FILE", str(DEFAULT_UPLOAD_REGISTRY))
     )
@@ -203,6 +208,7 @@ def append_upload_registry(
         "video_id": video_id,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "title": (title or "").strip(),
+        "title_variant": (title_variant or "").strip(),
         "script": excerpt,
     }
     with path.open("a", encoding="utf-8") as fh:

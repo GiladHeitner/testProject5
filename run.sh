@@ -111,7 +111,7 @@ cmd=(
   python shorts_bot.py
   --words "$WORDS"
   --gameplay-top-crop 96
-  --bgm-volume 0.24
+  --bgm-volume 0.75
 )
 
 if [[ ${#topic_arg[@]} -gt 0 ]]; then
