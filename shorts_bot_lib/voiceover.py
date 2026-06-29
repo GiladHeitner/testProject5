@@ -187,17 +187,27 @@ def generate_voiceover_openai_tts(client: OpenAI, script_text: str, out_audio_pa
     print_sub_progress(0, total, f"Generating voiceover (0/{total} chunks)")
 
     models_to_try = ["gpt-4o-mini-tts", "tts-1"]
+    # Energetic young-male voice + tone instructions so the fallback isn't a flat
+    # monotone. (Production uses the ElevenLabs Adam clone; this is the backup path.)
+    voice = os.environ.get("OPENAI_TTS_VOICE", "ash")
+    tts_instructions = (
+        "Speak like a frustrated, fast-talking 17-year-old Muslim teen ranting to "
+        "camera: high energy, emotional, fed up. Natural teen cadence, not a calm "
+        "radio host."
+    )
 
     def _synth_chunk(chunk_text: str) -> bytes:
         last_exc: Exception | None = None
         for model in models_to_try:
             try:
-                audio = client.audio.speech.create(
-                    model=model,
-                    voice="alloy",
-                    input=chunk_text,
-                    format="mp3",
+                # SDK param is response_format, not format; instructions only on the
+                # gpt-4o-mini-tts model.
+                kwargs = dict(
+                    model=model, voice=voice, input=chunk_text, response_format="mp3"
                 )
+                if model == "gpt-4o-mini-tts":
+                    kwargs["instructions"] = tts_instructions
+                audio = client.audio.speech.create(**kwargs)
                 return audio.read()
             except Exception as exc:
                 last_exc = exc

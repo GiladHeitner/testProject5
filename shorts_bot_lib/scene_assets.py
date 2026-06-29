@@ -367,53 +367,52 @@ def _fetch_scene_image(
     best_path: Optional[Path] = None
     best_score: int = -1
     best_label: str = ""
+    # Don't show a clearly-irrelevant image; better to skip the popup entirely.
+    min_score = int(os.environ.get("SCENE_MIN_IMAGE_SCORE", "5"))
 
-    pipeline_path, pipeline_source = fetch_image_to_path(scene.query, target_jpg)
-    if pipeline_path is not None and pipeline_source:
-        print(f"   {pipeline_source:9} -> {target_jpg.name}")
+    def _consider(source_for_best: str) -> bool:
+        """Judge the image now at target_jpg; return True if accepted, else stash best."""
+        nonlocal best_path, best_score, best_label
         verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
         if verdict.ok:
-            return target_jpg, pipeline_source
-        print(f"   judge REJECT {pipeline_source} (score={verdict.score}): {verdict.reason}")
+            return True
+        print(f"   judge REJECT {source_for_best} (score={verdict.score}): {verdict.reason}")
         if verdict.score > best_score:
             best_score = verdict.score
-            best_label = pipeline_source
-            best_path = out_dir / f"{base_name}_best_{pipeline_source}.jpg"
+            best_label = source_for_best
+            best_path = out_dir / f"{base_name}_best_{source_for_best}.jpg"
             best_path.write_bytes(target_jpg.read_bytes())
+        return False
 
+    # Real stock photos FIRST — Pexels/Unsplash return relevant people/scenes for
+    # storytime. The Met/Wikimedia pipeline returns museum art that the judge almost
+    # always rejects, so it's now the last resort (was first → wasted calls + slop).
     if pexels_key:
         url = _search_pexels(pexels_key, scene.query)
         if url and _download_image(url, target_jpg):
             print(f"   pexels    -> {target_jpg.name}")
-            verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
-            if verdict.ok:
+            if _consider("pexels"):
                 return target_jpg, "pexels"
-            print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
-            if verdict.score > best_score:
-                best_score = verdict.score
-                best_label = "pexels"
-                best_path = out_dir / f"{base_name}_best_pexels.jpg"
-                best_path.write_bytes(target_jpg.read_bytes())
 
     if unsplash_key:
         url = _search_unsplash(unsplash_key, scene.query)
         if url and _download_image(url, target_jpg):
             print(f"   unsplash  -> {target_jpg.name}")
-            verdict = judge_image(client=openai_client, image_path=target_jpg, expected=expected)
-            if verdict.ok:
+            if _consider("unsplash"):
                 return target_jpg, "unsplash"
-            print(f"   judge REJECT stock (score={verdict.score}): {verdict.reason}")
-            if verdict.score > best_score:
-                best_score = verdict.score
-                best_label = "unsplash"
-                best_path = out_dir / f"{base_name}_best_unsplash.jpg"
-                best_path.write_bytes(target_jpg.read_bytes())
 
-    if best_path is not None:
+    pipeline_path, pipeline_source = fetch_image_to_path(scene.query, target_jpg)
+    if pipeline_path is not None and pipeline_source:
+        print(f"   {pipeline_source:9} -> {target_jpg.name}")
+        if _consider(pipeline_source):
+            return target_jpg, pipeline_source
+
+    # Only fall back to a rejected image if it's at least borderline relevant.
+    if best_path is not None and best_score >= min_score:
         print(f"   accept best from {best_label} (score={best_score})")
         return best_path, best_label
 
-    print(f"   FAILED to obtain image for scene {scene.index}")
+    print(f"   no image >= min score {min_score}; skipping popup for scene {scene.index}")
     return None, None
 
 
