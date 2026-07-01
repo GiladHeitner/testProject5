@@ -19,7 +19,17 @@ The channel does NOT have a reach problem — it has a **loyalty/conversion prob
 Full diagnosis + roadmap: **`CHANNEL_IMPROVEMENT_PLAN.md`** (read it first).
 
 ## Current status (update this section regularly)
-_Last updated: 2026-06-28_
+_Last updated: 2026-07-01_
+
+**2026-07-01 live-Studio + registry audit (key corrections):**
+- ❗ **Actual cadence through Jun 28 was 4–5 uploads/day** (registry timestamps ~01:15/06:30/15:14/20:15 UTC — the external cron was firing 4–5×/day). Dropped to 1/day from Jun 29. The Jun-28 "cadence ~1/day confirmed" note was wrong at the time. Verify cron-job.org has exactly ONE enabled job.
+- ❗ Content flood Jun 22–28 was ~8 near-identical arranged-marriage videos + **out-of-season Ramadan scripts** (Ramadan 2026 ended Mar 19; bot posted "I'm fasting right now" content in late June). Daily views fell ~37K/day (early June) → ~5K/day.
+- ❗ The ED/body-image story ("Why Do I Feel Fat at 103 Pounds?!", mcBsUYjEGNM) became series Part 1 + Part 2 (Jun 28/30) — uploaded before the safety filter shipped. Brand/policy risk; user to decide on unlisting.
+- ✅ New pipeline confirmed live in production as of the Jul 1 upload: curiosity title variant, no emoji/hashtags, new CTA ("tomorrow's story…"). Old CTA "Subscribe before I get banned!" ran on every video through Jun 28.
+- 📊 28-day (Jun 3–30): 252.6K views (+28%), 816.9h watch (flat), +202 subs (−21%), 522 total.
+- 🏆 All-time top Shorts = **specific incident + injustice/identity conflict, school-set**: "Why All the Muslim Hate?" 25K/318 comments; "Secret Language" 22K; "Teacher Forces Hijab Removal" 10K; "Cops Called for Eid Prayers" 9.6K; "Teacher Calls Quran a Comic Book" 9K. Generic musing-style scripts underperform.
+- ℹ️ Channel identity: **the name stays "HalalRants"** (user's explicit 2026-07-01 decision). What the user wants back is the **"Muslim Rants"-era CONTENT style** (the Apr–early-June hits): specific incident + injustice/identity-conflict stories, school/public settings, "the hate we get" discussion topics. NOT a rename. (Note: both allowed name changes for the 14-day window were burned on 2026-07-01 by a rename+revert misunderstanding — no name changes possible until ~2026-07-15.)
+- 🎣 **Hook fix shipped 2026-07-01:** 21/25 recent uploads opened with rhetorical questions; root cause was `ADAPTATION_BRIEF_PROMPT` asking for a "reddit-title style question" hook. Now: brief + script prompt demand declarative just-happened statement hooks, and `generate_script` regenerates (≤3 attempts) when `hook_is_weak()` flags a question/vague opener. Part 2 continuations exempt.
 
 **Shipped & committed:**
 - ✅ Removed GitHub `schedule:` crons from `upload.yml` (committed + pushed to main: `a4b9249..ecab486`).

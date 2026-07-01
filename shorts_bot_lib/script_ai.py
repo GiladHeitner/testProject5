@@ -35,7 +35,7 @@ CHANNEL HOST (same person every video — retell SOURCE as their own experience)
 Write a short adaptation brief (plain text, not JSON):
 1. How this story maps to the host (what happened, emotional beat)
 2. Three to five concrete details to weave in (emotions, people, actions — no city/state/country names)
-3. Hook angle in the host's voice (reddit-title style question or shock line)
+3. Hook angle in the host's voice: ONE declarative sentence stating the most shocking thing that JUST happened, with a concrete actor and action ("My teacher just...", "Security pulled me out of..."). NEVER a question, never vague ("this issue", "people these days").
 
 Keep it under 120 words."""
 
@@ -72,6 +72,12 @@ STYLE RULES (match these exactly):
   happens next. Start a new paragraph after it.
 - Do NOT open with a slow setup or scene-setting ("So basically...", "Let me
   tell you about...", "Today I..."). Open AT the conflict, mid-action.
+- The hook is a STATEMENT, never a question. Do NOT open with "Why...", "How...",
+  "Ever feel...", "Is it just me...", "Can you believe...", or ANY line ending in
+  "?". State the specific thing that JUST happened, naming a real person and
+  action ("My teacher just told the whole class...", "Security pulled me out of
+  the lunch line..."). Vague abstractions ("this issue", "expectations",
+  "society") are banned from the first line.
 - The hook spikes curiosity but does NOT reveal how it ends (the title is built
   from this line, so keep the payoff hidden).
 - Lean into conflict: discrimination, islamophobia, school rules, family pressure, Ramadan, diaspora — not generic teen drama
@@ -245,6 +251,36 @@ def _generate_adaptation_brief(
         return "Retell the source as the host's own rant in present tense."
 
 
+# Question/vague openers kill the first 3 seconds — 19 of 25 June uploads opened
+# with "Why is..." style rhetorical questions and underperformed the statement-hook
+# hits ("Teacher Forces Hijab Removal..."). Gate + regenerate instead of trusting
+# the prompt alone.
+_WEAK_HOOK_OPENER_RE = re.compile(
+    r"^(?:so,?\s+|like,?\s+)?"
+    r"(?:why|how|what|when|is|are|isn|aren|can|could|would|do|does|did|ever|has|have|am"
+    r"|anyone|y[’']?all|imagine|raise your hand)\b",
+    re.IGNORECASE,
+)
+
+
+def hook_is_weak(script: str) -> bool:
+    """True if the first spoken sentence is a question or question-shaped opener."""
+    cleaned = strip_paralinguistic_tags(strip_script_markup(script)).strip()
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
+    if not sentences:
+        return True
+    first = sentences[0]
+    return first.endswith("?") or bool(_WEAK_HOOK_OPENER_RE.match(first))
+
+
+_HOOK_RETRY_DIRECTIVE = (
+    "\n\nIMPORTANT: Your previous attempt opened with a question or vague line. "
+    "The FIRST sentence must be a declarative statement of the specific thing that "
+    "just happened, naming a person and an action. No question marks in the first "
+    "sentence."
+)
+
+
 def generate_script(
     client: OpenAI,
     target_words: int,
@@ -268,14 +304,21 @@ def generate_script(
     # Series mechanic (Part 1 / Part 2) appends role-specific instructions.
     if series_directive:
         prompt = f"{prompt}{series_directive}"
-    resp = client.responses.create(
-        model="gpt-4o",
-        input=prompt,
-        # Higher temperature + the rotating exemplars keep scripts varied and
-        # less template-y (was 0.5, which read robotic/repetitive across uploads).
-        temperature=0.85,
-    )
-    return strip_speed_ramp_hyphens(resp.output_text.strip())
+    script = ""
+    for attempt in range(3):
+        resp = client.responses.create(
+            model="gpt-4o",
+            input=prompt if attempt == 0 else f"{prompt}{_HOOK_RETRY_DIRECTIVE}",
+            # Higher temperature + the rotating exemplars keep scripts varied and
+            # less template-y (was 0.5, which read robotic/repetitive across uploads).
+            temperature=0.85,
+        )
+        script = strip_speed_ramp_hyphens(resp.output_text.strip())
+        # Part 2 scripts open mid-story by design; only gate fresh hooks.
+        if "THIS IS PART 2" in series_directive.upper() or not hook_is_weak(script):
+            return script
+        print(f"Weak hook on attempt {attempt + 1}, regenerating: {script[:80]!r}")
+    return script
 
 
 def generate_pinned_comment(
