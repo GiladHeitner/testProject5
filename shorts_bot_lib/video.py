@@ -223,6 +223,7 @@ def build_filter_complex(
     content_crop: str | None = None,
     gameplay_speed: float = _DEFAULT_GAMEPLAY_SPEED,
     swap_starts: list[float] | None = None,
+    popup_input_start: int = 2,
 ) -> str:
     chains = []
     top_crop = max(0, int(source_top_crop))
@@ -346,7 +347,9 @@ def build_filter_complex(
             filters_after_scale += (
                 f",fade=t=out:st={fade_st:.3f}:d={fade_dur:.3f}:alpha=1"
             )
-        chains.append(f"[{i + 2}:v]{pts_prefix}{scale_part}{filters_after_scale}[img{i}]")
+        chains.append(
+            f"[{i + popup_input_start}:v]{pts_prefix}{scale_part}{filters_after_scale}[img{i}]"
+        )
 
     current = base_video
     for i, popup in enumerate(popups, start=0):
@@ -467,6 +470,8 @@ def compose_video(
         content_crop=content_crop,
         gameplay_speed=speed_factor,
         swap_starts=swap_starts,
+        # Popup inputs follow gameplay(0), narration(1), and the optional hook clip.
+        popup_input_start=2 + (1 if hook_video_input_index is not None else 0),
     )
     for popup in popup_images:
         if popup.path.suffix.lower() == ".gif":

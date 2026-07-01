@@ -44,6 +44,7 @@ from shorts_bot_lib.channel_persona import (
     load_channel_persona,
     persona_summary,
 )
+from shorts_bot_lib.hook_video import fetch_best_hook_video
 from shorts_bot_lib.keyword_popups import build_keyword_popups
 from shorts_bot_lib.subscribe_cta import apply_subscribe_cta
 from shorts_bot_lib.scene_assets import Scene, _fetch_scene_image, build_scene_popups
@@ -396,6 +397,22 @@ def _drop_hook_overlapping_popups(
         if popup.start_sec < hook_cutoff:
             print(
                 f"Dropping keyword popup overlapping hook: "
+                f"{popup.path.name} @ {popup.start_sec:.2f}s"
+            )
+            continue
+        kept.append(popup)
+    return kept
+
+
+def _drop_popups_in_hook_window(
+    popups: List[PopupImage], cutoff_sec: float
+) -> List[PopupImage]:
+    """Drop keyword popups that would sit under the hook video PiP."""
+    kept: List[PopupImage] = []
+    for popup in popups:
+        if popup.start_sec < cutoff_sec:
+            print(
+                f"Dropping keyword popup overlapping hook video: "
                 f"{popup.path.name} @ {popup.start_sec:.2f}s"
             )
             continue
@@ -963,22 +980,45 @@ def main() -> None:
         else:
             print(f"Subscribe CTA: GIF not found at {subscribe_gif}")
 
-    # Opening hook popup at t=0; Discord notification SFX is wired to it below.
-    opening_popup: PopupImage | None = None
+    # Opening hook visual at t=0. Prefer a moving Pexels clip (PiP, same slot as
+    # the static opening popup); fall back to the stock-image popup when no clip
+    # can be fetched. HOOK_VIDEO_SECONDS=0 disables the clip.
+    hook_video_path: Path | None = None
     try:
-        opening_popup = _ensure_opening_popup_at_start(
-            popups,
-            script=script,
-            client=client,
-            narration_duration=narration_duration,
-            output_dir=output_dir,
+        hook_video_seconds = float(os.environ.get("HOOK_VIDEO_SECONDS", "2.5") or 2.5)
+    except ValueError:
+        hook_video_seconds = 2.5
+    if hook_video_seconds > 0:
+        try:
+            hook_video_path = fetch_best_hook_video(
+                client, script, output_dir / "hook_video"
+            )
+        except Exception as exc:
+            print(f"Hook video fetch failed: {exc}")
+    if hook_video_path is not None:
+        print(
+            f"Hook video PiP for first {hook_video_seconds:.1f}s: "
+            f"{hook_video_path.name}"
         )
-    except Exception as exc:
-        print(f"Opening popup failed: {exc}")
+
+    opening_popup: PopupImage | None = None
+    if hook_video_path is None:
+        try:
+            opening_popup = _ensure_opening_popup_at_start(
+                popups,
+                script=script,
+                client=client,
+                narration_duration=narration_duration,
+                output_dir=output_dir,
+            )
+        except Exception as exc:
+            print(f"Opening popup failed: {exc}")
 
     if opening_popup is not None:
         opening_popup.start_sec = 0.0
         popups = _drop_hook_overlapping_popups(popups, opening_popup)
+    elif hook_video_path is not None:
+        popups = _drop_popups_in_hook_window(popups, hook_video_seconds + 0.2)
 
     normalized_sounds_dir = ensure_normalized_sounds(
         project_root / "assets" / "sounds",
@@ -1004,7 +1044,10 @@ def main() -> None:
     if discord_target is None and popups:
         discord_target = min(popups, key=lambda p: (p.start_sec, p.end_sec))
     if discord_target is not None and discord_sfx.exists():
-        discord_target.start_sec = 0.0
+        # With a hook video PiP the first popup stays at its natural time
+        # (moving it to t=0 would bury it under the clip).
+        if hook_video_path is None:
+            discord_target.start_sec = 0.0
         discord_target.play_sfx = True
         discord_target.sfx_path = discord_sfx.resolve()
         print(f"Discord SFX on opening popup: {discord_target.path.name}")
@@ -1025,6 +1068,8 @@ def main() -> None:
         srt_path=subtitle_file,
         popup_images=popups,
         out_video_path=output_video,
+        hook_video_path=hook_video_path,
+        hook_video_duration=hook_video_seconds,
         duration_seconds=args.duration_seconds or narration_duration,
         burn_subtitles=burn_subtitles,
         popup_sfx_path=Path(args.popup_sfx) if args.popup_sfx else None,
