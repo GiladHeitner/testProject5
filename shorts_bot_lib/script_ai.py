@@ -280,6 +280,12 @@ _HOOK_RETRY_DIRECTIVE = (
     "sentence."
 )
 
+_OFF_SEASON_NOTE = (
+    "\n\nSEASON NOTE: It is NOT Ramadan right now. If the source mentions "
+    "Ramadan, fasting, iftar, suhoor, or Eid, retell it as 'last Ramadan' — a "
+    "recent memory — never as happening today.\n"
+)
+
 
 def generate_script(
     client: OpenAI,
@@ -304,6 +310,10 @@ def generate_script(
     # Series mechanic (Part 1 / Part 2) appends role-specific instructions.
     if series_directive:
         prompt = f"{prompt}{series_directive}"
+    from .reddit_topics import is_ramadan_season
+
+    if not is_ramadan_season():
+        prompt = f"{prompt}{_OFF_SEASON_NOTE}"
     script = ""
     for attempt in range(3):
         resp = client.responses.create(

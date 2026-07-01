@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -89,10 +90,65 @@ _FEMALE_PROTAGONIST_RE = re.compile(
 )
 
 
+# --- Seasonality ----------------------------------------------------------------
+# Scripts retell sources in the present tense, so an old Ramadan post becomes
+# "I'm fasting right now" published in July — reads fake (late-June 2026 uploads
+# did exactly this). Approximate Ramadan windows padded through Eid al-Fitr.
+_RAMADAN_WINDOWS = {
+    2026: ((2, 17), (3, 22)),
+    2027: ((2, 6), (3, 11)),
+    2028: ((1, 26), (2, 29)),
+    2029: ((1, 14), (2, 17)),
+    2030: ((1, 4), (2, 7)),
+}
+
+
+def is_ramadan_season(today: _dt.date | None = None) -> bool:
+    today = today or _dt.date.today()
+    window = _RAMADAN_WINDOWS.get(today.year)
+    if window is None:
+        return True  # unknown year — don't block anything
+    (sm, sd), (em, ed) = window
+    return _dt.date(today.year, sm, sd) <= today <= _dt.date(today.year, em, ed)
+
+
+# "Muslim Rants"-era hits are concrete incidents of injustice happening TO the
+# narrator (Teacher Forces Hijab Removal 10K, Cops Called for Eid Prayers 9.6K,
+# Teacher Calls Quran a Comic Book 9K). Opinion/musing posts become the weak
+# "Why is...?" rants that underperform — boost incidents, penalize musings.
+_INCIDENT_KEYWORDS = re.compile(
+    r"suspended|expelled|detention|kicked (me |us )?out|pulled me (out|aside|over)|"
+    r"accused|blamed me|called (the )?(cops|police|security)|security guard|"
+    r"searched (my|me)|confiscated|in front of (the |my )?(whole )?(class|everyone|school)|"
+    r"screamed at|yelled at|banned (me|us)|fired me|reported me|dress.?coded|"
+    r"told the whole|made me take|forced (me|us) to|wouldn't let me|refused to let",
+    re.IGNORECASE,
+)
+_MUSING_OPENER_RE = re.compile(
+    r"^(?:so[,\s]+)?(?:why (do|does|is|are|can)|does anyone else|is it just me|"
+    r"am i the only|anyone else|what do you (guys )?think|thoughts on|"
+    r"unpopular opinion|cmv\b|how do you feel about|discussion:)",
+    re.IGNORECASE,
+)
+
+
+def _topic_title(text: str) -> str:
+    lines = (text or "").splitlines()
+    if len(lines) > 2 and lines[0].startswith("Reddit post from r/"):
+        return lines[2].strip()
+    return (lines[0] if lines else "").strip()
+
+
 def topic_priority_score(text: str) -> int:
     score = 1 if matches_muslim_arab_niche(text) else 0
     if _PRIORITY_NICHE_KEYWORDS.search(text or ""):
         score += 10
+    if _INCIDENT_KEYWORDS.search(text or ""):
+        score += 6
+    if _MUSING_OPENER_RE.match(_topic_title(text)):
+        score -= 4
+    if classify_topic_theme(text) == "ramadan" and not is_ramadan_season():
+        score -= 8
     return score
 
 
@@ -261,6 +317,8 @@ def is_quality_storytime_post(post: RedditPost) -> bool:
         return False
     if _STORYTIME_REJECT_RE.search(text):
         return False
+    if classify_topic_theme(text) == "ramadan" and not is_ramadan_season():
+        return False
     body = post.selftext.strip() or _topic_body(text)
     if len(body) < MIN_HARVEST_SELFTEXT_CHARS:
         return False
@@ -280,6 +338,8 @@ def is_quality_storytime_entry(text: str) -> bool:
     if not matches_muslim_arab_niche(text) or not matches_host_persona(text):
         return False
     if _STORYTIME_REJECT_RE.search(text):
+        return False
+    if classify_topic_theme(text) == "ramadan" and not is_ramadan_season():
         return False
     body = _topic_body(text)
     if len(body) < MIN_HARVEST_SELFTEXT_CHARS:
