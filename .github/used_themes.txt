@@ -2,3 +2,4 @@ ramadan
 religion
 family
 islamophobia
+other
