@@ -3,3 +3,4 @@ religion
 family
 islamophobia
 other
+school
